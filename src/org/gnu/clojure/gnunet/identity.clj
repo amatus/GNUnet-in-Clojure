@@ -2,21 +2,41 @@
 
 (defn bit-count-to-bytes [x] (quot (+ 7 x) 8))
 
-(defn bigint-to-bytes [x]
+(defn encode-bigint
+  "Convert a bigInteger to a sequence of bytes in bigendian."
+  [x]
   (let [len (bit-count-to-bytes (.bitLength x))
         a (.toByteArray x)]
     (drop (- (alength a) len) a)))
 
-(defn short-to-bytes [x]
-  (list (quot x 256) (rem x 256)))
+(defn encode-short
+  "Convert a short to a sequence of bytes in bigendian."
+  [x]
+  (list (byte (quot x 256)) (byte (rem x 256))))
 
-(defn rsa-public-key-binary-encoded [key]
-  (let [modulus (bigint-to-bytes (.getModulus key)) 
-        exponent (bigint-to-bytes (.getPublicExponent key))
-        len (+ (count modulus) (count exponent) 4)]
+(defn encode-rsa-public-key
+  "Convert an RSA public key to a sequence of bytes in gnunet format"
+  [key]
+  (let [modulus (encode-bigint (.getModulus key)) 
+        modulus-len (count modulus)
+        exponent (encode-bigint (.getPublicExponent key))
+        exponent-len (count exponent)]
     (concat
-      (short-to-bytes len)
-      (short-to-bytes (count modulus))
+      (encode-short (+ modulus-len exponent-len 4))
+      (encode-short modulus-len)
       modulus
       exponent
-      (short-to-bytes 0))))
+      (encode-short 0))))
+
+(defn generate-rsa-keypair
+  "Generate a 2048 bit RSA keypair"
+  []
+  (let [rsa (java.security.KeyPairGenerator/getInstance "RSA")
+        spec (java.security.spec.RSAKeyGenParameterSpec. 2048 (bigint 257))]
+    (.initialize rsa spec)
+    (.generateKeyPair rsa)))
+
+(defn sha-512
+  [x]
+  (let [sha (java.security.MessageDigest/getInstance "SHA-512")]
+    (.digest sha (byte-array x))))
