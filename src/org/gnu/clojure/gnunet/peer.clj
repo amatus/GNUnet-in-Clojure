@@ -2,16 +2,19 @@
   (:use (org.gnu.clojure.gnunet identity)))
 
 (defstruct remote-peer
+  :public-key
   :id)
 
 (def peer (apply create-struct (concat
   (keys (struct-map remote-peer))
-  (list :keypair))))
+  (list
+    :private-key))))
 
 (defstruct peer-options
   :keypair)
 
 (defn new-peer [options]
   (struct-map peer
-    :keypair (:keypair options)
+    :public-key (.getPublic (:keypair options))
+    :private-key (.getPrivate (:keypair options))
     :id (generate-id (:keypair options))))
