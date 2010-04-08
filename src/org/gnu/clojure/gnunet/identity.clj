@@ -40,3 +40,8 @@
   [x]
   (let [sha (java.security.MessageDigest/getInstance "SHA-512")]
     (.digest sha (byte-array x))))
+
+(defn generate-id
+  "Generate the SHA-512 hash of the encoded public key"
+  [keypair]
+  (sha-512 (encode-rsa-public-key (.getPublic keypair))))
