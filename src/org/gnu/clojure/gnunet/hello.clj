@@ -12,12 +12,16 @@
     (encode-int64 (.getTime (:expiration transport)))
     (:encoded-address transport)))
 
+(defn decode-transports-and-split
+  [a]
+  )
+
 (defn encode-hello
   "Encode a hello message."
-  [public-key transports]
+  [hello]
   (let [padding (encode-int32 0)
-        encoded-key (encode-rsa-public-key public-key)
-        encoded-transports (mapcat encode-transport transports)
+        encoded-key (encode-rsa-public-key (:public-key hello))
+        encoded-transports (mapcat encode-transport (:transports hello))
         size (+ header-size
                (count padding)
                (count encoded-key)
@@ -27,3 +31,15 @@
       padding
       encoded-key
       encoded-transports)))
+
+(defn decode-hello-and-split
+  [a]
+  (let [[header after-header] (decode-header-and-split a)
+        [padding after-padding] (split-at 4 after-header)
+        [public-key after-public-key] (decode-rsa-public-key-and-split
+                                        after-padding)
+        [transports after-transports] (decode-transports-and-split
+                                        after-public-key)]
+    [{:public-key public-key
+      :transports transports}
+     after-transports]))
