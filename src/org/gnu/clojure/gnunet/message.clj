@@ -29,14 +29,36 @@
     (encode-int32 (bit-and x 0xFFFFFFFF))))
 
 (defn decode-int
-  "Convert a sequence of bytes in network order to a 2's complement integer"
+  "Convert a sequence of bytes in network order to a 2's complement integer."
   [a]
   (BigInteger. (byte-array a)))
 
 (defn decode-uint
-  "Convert a sequence of bytes in network order to an unsigned integer"
+  "Convert a sequence of bytes in network order to an unsigned integer."
   [a]
   (BigInteger. 1 (byte-array a)))
+
+(defn split-at-or-throw
+  [n a]
+  (let [[head tail] (split-at n a)]
+    (if (not (== (count head) n))
+      (throw (java.lang.Exception. "Not long enough.")))
+    [head tail]))
+
+(defn decode-uint16-and-split
+  [a]
+  (let [[encoded-int after-encoded-int] (split-at-or-throw 2 a)]
+    [(int (decode-uint encoded-int)) after-encoded-int]))
+
+(defn decode-uint32-and-split
+  [a]
+  (let [[encoded-int after-encoded-int] (split-at-or-throw 4 a)]
+    [(int (decode-uint encoded-int)) after-encoded-int]))
+
+(defn decode-uint64-and-split
+  [a]
+  (let [[encoded-int after-encoded-int] (split-at-or-throw 8 a)]
+    [(long (decode-uint encoded-int)) after-encoded-int]))
 
 (defn encode-header
   "Encode a gnunet message header."
@@ -48,10 +70,16 @@
 (def header-size (count (encode-header {:size 0 :message-type 0})))
 
 (defn decode-header-and-split
-  "Split a seq into a gnunet message header and the rest"
+  "Split a seq into a gnunet message header and the rest."
   [a]
-  (let [[encoded-size after-encoded-size] (split-at 2 a)
-        [encoded-type after-encoded-type] (split-at 2 after-encoded-size)]
-    [{:size (decode-uint encoded-size)
-      :message-type (decode-uint encoded-type)}
-     after-encoded-type]))
+  (let [[size after-size] (decode-uint16-and-split a)
+        [message-type after-message-type] (decode-uint16-and-split after-size)]
+    [{:size size
+      :message-type message-type}
+     after-message-type]))
+
+(defn encode-message
+  [msg]
+  (concat
+    (encode-header (+ (count (:bytes msg)) header-size) (:message-type msg))
+    (:bytes msg)))
