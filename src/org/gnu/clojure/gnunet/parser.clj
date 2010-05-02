@@ -18,6 +18,7 @@
         (cons x xs)))))
 
 (defn is
+  "Produces a parser that matches an item which satisfies the given predicate."
   [p]
   (domonad parser-m [x item
                      :when (p x)]

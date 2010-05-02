@@ -50,6 +50,7 @@
   (domonad parser-m [xs (items 8)] (decode-uint xs)))
 
 (defn encode-utf8
+  "Converts a string into a null-terminated sequence of bytes in UTF-8."
   [string]
   (concat
     (.getBytes string "UTF-8")
@@ -88,3 +89,9 @@
   (concat
     (encode-header (+ (count (:bytes msg)) header-size) (:message-type msg))
     (:bytes msg)))
+
+(def parse-message
+  (domonad parser-m [header parse-header
+                     message (items (- (:size header) header-size))]
+    {:message-type (:message-type header)
+     :bytes message}))
