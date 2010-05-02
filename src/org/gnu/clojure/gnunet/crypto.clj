@@ -1,5 +1,6 @@
 (ns org.gnu.clojure.gnunet.crypto
-  (:use (org.gnu.clojure.gnunet message))
+  (:use (org.gnu.clojure.gnunet parser message)
+    clojure.contrib.monads)
   (:import (java.security KeyPairGenerator KeyFactory MessageDigest)
     (java.security.spec RSAKeyGenParameterSpec RSAPublicKeySpec)))
 
@@ -38,13 +39,11 @@
       exponent
       (encode-int16 0))))
 
-(defn decode-rsa-public-key-and-split
-  "Split a seq into an RSA public key and the rest."
-  [a]
-  (let [[len after-len] (decode-uint16-and-split a)
-        [sizen after-sizen] (decode-uint16-and-split after-len)
-        [encoded-n after-n] (split-at sizen after-sizen)
-        [encoded-e after-e] (split-at (- len sizen 4) after-n)
-        [padding after-padding] (decode-uint16-and-split after-e)]
-    [(generate-rsa-public-key (decode-uint encoded-n) (decode-uint encoded-e))
-     after-padding]))
+(def parse-rsa-public-key
+  (domonad parser-m [len parse-uint16
+                     sizen parse-uint16
+                     encoded-n (items sizen)
+                     encoded-e (items (- len sizen 4))
+                     padding parse-uint16
+                     :when (== padding 0)]
+    (generate-rsa-public-key (decode-uint encoded-n) (decode-uint encoded-e))))

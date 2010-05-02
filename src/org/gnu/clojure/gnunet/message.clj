@@ -1,5 +1,7 @@
 (ns org.gnu.clojure.gnunet.message
-  (:import java.math.BigInteger))
+  (:use org.gnu.clojure.gnunet.parser
+    clojure.contrib.monads)
+  (:import java.math.BigInteger java.lang.String java.util.Date))
 
 (defn bit-count-to-bytes [x] (quot (+ 7 x) 8))
 
@@ -38,27 +40,33 @@
   [a]
   (BigInteger. 1 (byte-array a)))
 
-(defn split-at-or-throw
-  [n a]
-  (let [[head tail] (split-at n a)]
-    (if (not (== (count head) n))
-      (throw (java.lang.Exception. "Not long enough.")))
-    [head tail]))
+(def parse-uint16
+  (domonad parser-m [xs (items 2)] (int (decode-uint xs))))
 
-(defn decode-uint16-and-split
-  [a]
-  (let [[encoded-int after-encoded-int] (split-at-or-throw 2 a)]
-    [(int (decode-uint encoded-int)) after-encoded-int]))
+(def parse-uint32
+  (domonad parser-m [xs (items 4)] (long (decode-uint xs))))
 
-(defn decode-uint32-and-split
-  [a]
-  (let [[encoded-int after-encoded-int] (split-at-or-throw 4 a)]
-    [(int (decode-uint encoded-int)) after-encoded-int]))
+(def parse-uint64
+  (domonad parser-m [xs (items 8)] (decode-uint xs)))
 
-(defn decode-uint64-and-split
-  [a]
-  (let [[encoded-int after-encoded-int] (split-at-or-throw 8 a)]
-    [(long (decode-uint encoded-int)) after-encoded-int]))
+(defn encode-utf8
+  [string]
+  (concat
+    (.getBytes string "UTF-8")
+    (list (byte 0))))
+
+(def parse-utf8
+  (domonad parser-m [xs (none-or-more (is #(not (== 0 %))))
+                     zero item
+                     :when (== zero 0)]
+    (String. (byte-array xs) "UTF-8")))
+
+(defn encode-date
+  [date]
+  (encode-int64 (.getTime date)))
+
+(def parse-date
+  (domonad parser-m [x parse-uint64] (Date. (long x))))
 
 (defn encode-header
   "Encode a gnunet message header."
@@ -69,14 +77,11 @@
 
 (def header-size (count (encode-header {:size 0 :message-type 0})))
 
-(defn decode-header-and-split
-  "Split a seq into a gnunet message header and the rest."
-  [a]
-  (let [[size after-size] (decode-uint16-and-split a)
-        [message-type after-message-type] (decode-uint16-and-split after-size)]
-    [{:size size
-      :message-type message-type}
-     after-message-type]))
+(def parse-header
+  (domonad parser-m [size parse-uint16
+                     message-type parse-uint16]
+    {:size size
+     :message-type message-type}))
 
 (defn encode-message
   [msg]
