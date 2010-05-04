@@ -3,9 +3,8 @@
 
 (defn download-hostlist
   "Calls the hello-processor on all parsed hello messages at the given URL."
-  [url hello-processor]
-  (doseq [msg (first ((none-or-more parse-message) (read-url url)))
-        :while (== (:message-type msg) message-type-hello)]
-    (try
-      (hello-processor (first (parse-hello (:bytes msg))))
-      (catch Exception e nil))))
+  [hello-processor url]
+  (doseq [[_ msg] (first ((none-or-more (parse-message-types
+                                          {message-type-hello parse-hello}))
+                           (read-url url)))]
+    (hello-processor msg)))

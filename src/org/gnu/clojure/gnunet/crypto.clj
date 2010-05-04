@@ -42,8 +42,12 @@
 (def parse-rsa-public-key
   (domonad parser-m [len parse-uint16
                      sizen parse-uint16
-                     encoded-n (items sizen)
-                     encoded-e (items (- len sizen 4))
+                     n (parse-uint sizen)
+                     e (parse-uint (- len sizen 4))
+                     :when (try
+                             (do (generate-rsa-public-key n e) true)
+                             (catch Exception e false)
+                             )
                      padding parse-uint16
                      :when (== padding 0)]
-    (generate-rsa-public-key (decode-uint encoded-n) (decode-uint encoded-e))))
+    (generate-rsa-public-key n e)))

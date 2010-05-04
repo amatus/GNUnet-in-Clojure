@@ -35,15 +35,15 @@
 (defn none-or-more
   "Makes a parser repeat none or more times."
   [mv]
-  (fn [s1]
-    (let [[v s2] ((parser-m-until
+  (fn [s]
+    (let [xs ((parser-m-until
                     first
-                    #(fn [s3]
-                       (if-let [x (mv s3)]
+                    #(fn [s]
+                       (if-let [x (mv s)]
                          [[false (conj (second %) (first x))] (second x)]
-                         [[true (second %)] s3]))
-                    [false []]) s1)]
-      [(second v) s2])))
+                         [[true (second %)] s]))
+                    [false []]) s)]
+      [(second (first xs)) (second xs)])))
 
 (defn one-or-more
   "Makes a parser repeat one or more times."

@@ -49,6 +49,10 @@
 (def parse-uint64
   (domonad parser-m [xs (items 8)] (decode-uint xs)))
 
+(defn parse-uint
+  [n]
+  (domonad parser-m [xs (items n)] (decode-uint xs)))
+
 (defn encode-utf8
   "Converts a string into a null-terminated sequence of bytes in UTF-8."
   [string]
@@ -95,3 +99,15 @@
                      message (items (- (:size header) header-size))]
     {:message-type (:message-type header)
      :bytes message}))
+
+(defn parse-message-types
+  "Produces a parser for messages of the given types.
+   The parser does not fail if the message-type specific parser does not consume
+   the entire message."
+  [parser-map]
+  (fn [s]
+    (when-let [xs (parse-message s)]
+      (let [[{message-type :message-type message :bytes} ss] xs]
+        (when (contains? parser-map message-type)
+          (when-let [xs ((get parser-map message-type) message)]
+            [[message-type (first xs)] ss]))))))
