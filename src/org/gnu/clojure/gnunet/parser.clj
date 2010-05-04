@@ -3,19 +3,21 @@
 
 (def parser-m (state-t maybe-m))
 
+(defn parser-m-until
+  "An optimized implementation of m-until for the parser monad that
+   replaces recursion by a loop."
+  [p f x]
+  (letfn [(until [p f x s]
+            (if (p x)
+              [x s]
+              (when-let [xs ((f x) s)]
+                (recur p f (first xs) (second xs)))))]
+    (fn [s] (until p f x s))))
+
 (defn item
   "Parser which returns the first item of input."
   [xs]
   (when (not (empty? xs)) [(first xs) (rest xs)]))
-
-(defn items
-  "Produces a parser that returns the first n items of input."
-  [n]
-  (with-monad parser-m
-    (m-when (> n 0)
-      (domonad [x item
-                xs (items (- n 1))]
-        (cons x xs)))))
 
 (defn is
   "Produces a parser that matches an item which satisfies the given predicate."
@@ -30,12 +32,18 @@
   (with-monad parser-m
     (m-plus mv (m-result nil))))
 
-(def one-or-more)
-
 (defn none-or-more
   "Makes a parser repeat none or more times."
   [mv]
-  (optional (one-or-more mv)))
+  (fn [s1]
+    (let [[v s2] ((parser-m-until
+                    first
+                    #(fn [s3]
+                       (if-let [x (mv s3)]
+                         [[false (conj (second %) (first x))] (second x)]
+                         [[true (second %)] s3]))
+                    [false []]) s1)]
+      [(second v) s2])))
 
 (defn one-or-more
   "Makes a parser repeat one or more times."
@@ -43,3 +51,20 @@
   (domonad parser-m [x mv
                      xs (none-or-more mv)]
     (cons x xs)))
+
+(defn n-times
+  "Makes a parser repeat exactly n times."
+  [mv n]
+  (fn [s]
+    (when-let [xs ((parser-m-until
+                    #(>= (first %) n)
+                    #(fn [s]
+                       (when-let [xs (mv s)]
+                         [[(inc (first %)) (conj (second %) (first xs))]
+                          (second xs)]))
+                    [0 []]) s)]
+      [(second (first xs)) (second xs)])))
+
+(def
+  #^{:doc "Produces a parser that matches a number of items."}
+  items (partial n-times item))
