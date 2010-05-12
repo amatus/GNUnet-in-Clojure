@@ -95,9 +95,9 @@
     (:bytes msg)))
 
 (def parse-message
-  (domonad parser-m [header parse-header
-                     message (items (- (:size header) header-size))]
-    {:message-type (:message-type header)
+  (domonad parser-m [{message-type :message-type size :size} parse-header
+                     message (items (- size header-size))]
+    {:message-type message-type
      :bytes message}))
 
 (defn parse-message-types
@@ -110,4 +110,4 @@
       (let [[{message-type :message-type message :bytes} ss] xs]
         (when (contains? parser-map message-type)
           (when-let [xs ((get parser-map message-type) message)]
-            [[message-type (first xs)] ss]))))))
+            [{:message-type message-type :message (first xs)} ss]))))))
