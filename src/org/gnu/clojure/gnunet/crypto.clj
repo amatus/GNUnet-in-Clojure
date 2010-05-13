@@ -65,15 +65,12 @@
   [prime]
   (== (.modPow (bigint 2) (dec prime) prime) 1))
 
-(defn randomize-test
-  []
+(defn
+  #^{:test (fn []
   (let [seed (sha-512 [])
         [n seed] (randomize 1024 seed)]
     (assert (== n 91590674251499093884392150551101679508885411058606840339755137987143766603275636247934528964993934135690152777440512955430485884972253333431499809071368893109850734973123733834291751787678335529426877428528037229911013836000235885623137710504201186733461410657974411464562780903763911167512126562189243987970))
-    (assert (= (seq seed) [-83 -57 -58 -86 82 42 91 -29 -56 -97 -36 -125 47 5 -57 120 48 -112 51 -103 26 113 29 126 -80 46 88 13 -23 -59 -15 49 -34 50 54 -99 -61 -106 -2 37 18 -103 -85 -98 -58 -4 33 -13 118 -112 125 -121 -43 43 19 11 -113 -116 59 14 37 66 56 2]))))
-
-(defn
-  #^{:test randomize-test}
+    (assert (= (seq seed) [-83 -57 -58 -86 82 42 91 -29 -56 -97 -36 -125 47 5 -57 120 48 -112 51 -103 26 113 29 126 -80 46 88 13 -23 -59 -15 49 -34 50 54 -99 -61 -106 -2 37 18 -103 -85 -98 -58 -4 33 -13 118 -112 125 -121 -43 43 19 11 -113 -116 59 14 37 66 56 2]))))}
   randomize
   [bit-length seed]
   (let [cnt (inc (quot bit-length 512))
@@ -89,7 +86,7 @@
         number (reduce bit-clear number (range bit-length bit -1))]
     (bit-set number bit)))
 
-(defn is-prime
+(defn miller-rabin-primality-test
   [n steps seed]
   (let [bit-length (.bitLength n)
         nminus1 (dec n)
@@ -103,20 +100,26 @@
                   (let [[x seed] (randomize bit-length seed)]
                     [(bit-clear x (- bit-length 2)) seed]))
               y (.modPow x q n)]
-          (if (and (not (== y 1)) (not (== y nminus1))
-                (not (loop [g (take k (iterate #(.modPow % (bigint 2) n) y))]
-                       (cond
-                         (nil? g) (== nminus1 y)
-                         (== 1 (first g)) false
-                         (nil? (next g)) (== nminus1 (first g))
-                         (== nminus1 (first g)) true
-                         :else (recur (next g)))))
-                [false seed])
-            (recur (inc step) seed)))))))
+          (if (or (== 1 y) (== nminus1 y))
+            (recur (inc step) seed)
+            (if (loop [g (next (take k (iterate #(.modPow % (bigint 2) n) y)))]
+                  (cond
+                    (nil? g) false
+                    (== 1 (first g)) false
+                    (== nminus1 (first g)) true
+                    :else (recur (next g))))
+              (recur (inc step) seed)
+              [false seed])))))))
 
 (def small-primes)
 
-(defn generate-prime
+(defn
+  #^{:test (fn []
+  (let [seed (sha-512 [])
+        [n seed] (generate-prime 1024 seed)]
+    (assert (== n 136533002623056991577624780320827297849334835532164504658112658276576935554650877031111648295595818140970181247408361294845183327175857489054711666731237424204292708329340105153367306687989859059290148166549288672120551506585851605991615988139407996024299038329120986024549592388383840243720965644595300023503))
+    (assert (= (seq seed) [-110 35 7 6 -114 -46 -94 -76 41 94 76 110 -116 9 -39 30 71 48 -55 -9 -95 -9 -117 -6 -31 -47 117 125 71 73 25 95 -100 50 123 -64 86 31 101 53 -89 33 -38 70 -77 15 -85 44 18 -5 -29 -4 -120 0 114 -79 81 -127 -102 102 126 -14 5 60]))))}
+  generate-prime
   [bit-length seed]
   {:pre [(>= bit-length 32)]}
   (loop [seed seed]
@@ -132,7 +135,11 @@
                                  (map #(rem (+ step %1) %2) mods small-primes))
                              (let [prime (+ prime step)]
                                (if (fermat-primality-test prime)
-                                 (let [[result seed] (is-prime prime 5 seed)]
+                                 (let [[result seed]
+                                       (miller-rabin-primality-test
+                                         prime
+                                         5
+                                         seed)]
                                    (if result
                                      [prime seed]
                                      (recur (inc step) seed)))
