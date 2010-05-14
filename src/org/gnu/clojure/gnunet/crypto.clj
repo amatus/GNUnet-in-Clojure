@@ -161,13 +161,13 @@
                                          n (* p q)]
                                      [n p q seed])
                            [(bigint 0) 0 0 seed]))
-          t1 (- p 1)
-          t2 (- q 1)
+          t1 (dec p)
+          t2 (dec q)
           phi (* t1 t2)
           g (.gcd t1 t2)
           f (quot phi g)
-          e (some #(when (== 1 (.gcd phi (bigint %))) %)
-              (iterate (partial + 2) 257))]
+          e (bigint (some #(when (== 1 (.gcd phi (bigint %))) %)
+                      (iterate (partial + 2) 257)))]
       (let [private-key (try
                   (let [d (.modInverse e f)
                         u (.modInverse p q)]
