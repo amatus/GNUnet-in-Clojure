@@ -37,7 +37,7 @@
 (defn encode-rsa-public-key
   "Convert an RSA public key to a sequence of bytes in gnunet format."
   [public-key]
-  (let [modulus (encode-int (.getModulus public-key)) 
+  (let [modulus (encode-int (.getModulus public-key))
         modulus-len (count modulus)
         exponent (encode-int (.getPublicExponent public-key))
         exponent-len (count exponent)]
@@ -61,32 +61,33 @@
                      :when (== padding 0)]
     (make-rsa-public-key n e)))
 
-(defn fermat-primality-test
-  [prime]
-  (== (.modPow (bigint 2) (dec prime) prime) 1))
-
 (defn
   #^{:test (fn []
-  (let [seed (sha-512 [])
-        [n seed] (randomize 1024 seed)]
-    (assert (== n 91590674251499093884392150551101679508885411058606840339755137987143766603275636247934528964993934135690152777440512955430485884972253333431499809071368893109850734973123733834291751787678335529426877428528037229911013836000235885623137710504201186733461410657974411464562780903763911167512126562189243987970))
-    (assert (= (seq seed) [-83 -57 -58 -86 82 42 91 -29 -56 -97 -36 -125 47 5 -57 120 48 -112 51 -103 26 113 29 126 -80 46 88 13 -23 -59 -15 49 -34 50 54 -99 -61 -106 -2 37 18 -103 -85 -98 -58 -4 33 -13 118 -112 125 -121 -43 43 19 11 -113 -116 59 14 37 66 56 2]))))}
-  randomize
+             (let [seed (sha-512 [])
+                   [n seed] (random-int 1024 seed)]
+               (assert (== n 145722097586741401146081933101625908822609966371134029821236387730376760429245348048227251733217120026252986740857779434920617271166036248533631595465678498079543252354969108228859509711652038086980961685030673985343697554674529134136563684623116336979340330220033374478392520298004708077375018922611329202505))
+               (assert (= (seq seed) [-83 -57 -58 -86 82 42 91 -29 -56 -97 -36 -125 47 5 -57 120 48 -112 51 -103 26 113 29 126 -80 46 88 13 -23 -59 -15 49 -34 50 54 -99 -61 -106 -2 37 18 -103 -85 -98 -58 -4 33 -13 118 -112 125 -121 -43 43 19 11 -113 -116 59 14 37 66 56 2]))))}
+  random-int
+  "Return a cryptographically weak random non-negative integer of the given
+   bit-length."
   [bit-length seed]
-  (let [cnt (inc (quot bit-length 512))
-        hashes (take cnt (iterate sha-512 seed))
-        number (BigInteger. 1 (byte-array (mapcat identity hashes)))
+  {:pre [(> bit-length 0)]}
+  (let [cnt (quot (+ bit-length 511) 512)
+        hashes (iterate sha-512 seed)
+        number (BigInteger. 1 (byte-array (mapcat identity (take cnt hashes))))
         len (.bitLength number)
-        number (reduce bit-clear number (range len (dec bit-length) -1))]
-    [number (last hashes)]))
+        number (reduce bit-clear number (range (dec len) (dec bit-length) -1))]
+    [number (nth hashes cnt)]))
 
-(defn set-highbit
-  [number bit]
-  (let [bit-length (.bitLength number)
-        number (reduce bit-clear number (range bit-length bit -1))]
-    (bit-set number bit)))
+(defn fermat-compositeness-test
+  "Perform Fermat's Compositeness Test on the given bigint."
+  [number]
+  (not (== (.modPow (bigint 2) (dec number) number) 1)))
 
-(defn miller-rabin-primality-test
+(defn miller-rabin-compositeness-test
+  "Perform the Miller-Rabin Compositeness Test on the given bigint with the
+   given number of rounds. This version uses a witness of 2 for the first
+   round."
   [n steps seed]
   (let [bit-length (.bitLength n)
         nminus1 (dec n)
@@ -94,11 +95,10 @@
         q (bit-shift-right nminus1 k)]
     (loop [step 0 seed seed]
       (if (>= step steps)
-        [true seed]
+        [false seed]
         (let [[x seed] (if (zero? step)
-                  [(bigint 2) seed]
-                  (let [[x seed] (randomize bit-length seed)]
-                    [(bit-clear x (- bit-length 2)) seed]))
+                         [(bigint 2) seed]
+                         (random-int (dec bit-length) seed))
               y (.modPow x q n)]
           (if (or (== 1 y) (== nminus1 y))
             (recur (inc step) seed)
@@ -109,23 +109,25 @@
                     (== nminus1 (first g)) true
                     :else (recur (next g))))
               (recur (inc step) seed)
-              [false seed])))))))
+              [true seed])))))))
 
 (def small-primes)
 
 (defn
   #^{:test (fn []
-  (let [seed (sha-512 [])
-        [n seed] (generate-prime 1024 seed)]
-    (assert (== n 136533002623056991577624780320827297849334835532164504658112658276576935554650877031111648295595818140970181247408361294845183327175857489054711666731237424204292708329340105153367306687989859059290148166549288672120551506585851605991615988139407996024299038329120986024549592388383840243720965644595300023503))
-    (assert (= (seq seed) [-110 35 7 6 -114 -46 -94 -76 41 94 76 110 -116 9 -39 30 71 48 -55 -9 -95 -9 -117 -6 -31 -47 117 125 71 73 25 95 -100 50 123 -64 86 31 101 53 -89 33 -38 70 -77 15 -85 44 18 -5 -29 -4 -120 0 114 -79 81 -127 -102 102 126 -14 5 60]))))}
+             (let [seed (sha-512 [])
+                   [n seed] (generate-prime 1024 seed)]
+               (assert (== n 145722097586741401146081933101625908822609966371134029821236387730376760429245348048227251733217120026252986740857779434920617271166036248533631595465678498079543252354969108228859509711652038086980961685030673985343697554674529134136563684623116336979340330220033374478392520298004708077375018922611329203201))
+               (assert (= (seq seed) [-110 35 7 6 -114 -46 -94 -76 41 94 76 110 -116 9 -39 30 71 48 -55 -9 -95 -9 -117 -6 -31 -47 117 125 71 73 25 95 -100 50 123 -64 86 31 101 53 -89 33 -38 70 -77 15 -85 44 18 -5 -29 -4 -120 0 114 -79 81 -127 -102 102 126 -14 5 60]))))}
   generate-prime
+  "Generates a cryptographically weak random prime of the given bit-length."
   [bit-length seed]
   {:pre [(>= bit-length 32)]}
   (loop [seed seed]
-    (let [[prime seed] (randomize bit-length seed)
-          prime (set-highbit prime (- bit-length 1))
-          prime (bit-set (bit-set prime (- bit-length 2)) 0)
+    (let [[prime seed] (random-int bit-length seed)
+          prime (bit-set prime (dec bit-length))
+          prime (bit-set prime (- bit-length 2))
+          prime (bit-set prime 0)
           mods (map (partial rem prime) small-primes)
           [prime seed] (loop [step 0 seed seed]
                          (if (> step 20000)
@@ -134,45 +136,55 @@
                                  zero?
                                  (map #(rem (+ step %1) %2) mods small-primes))
                              (let [prime (+ prime step)]
-                               (if (fermat-primality-test prime)
+                               (if (fermat-compositeness-test prime)
+                                 (recur (inc step) seed)
                                  (let [[result seed]
-                                       (miller-rabin-primality-test
+                                       (miller-rabin-compositeness-test
                                          prime
                                          5
                                          seed)]
                                    (if result
-                                     [prime seed]
-                                     (recur (inc step) seed)))
-                                 (recur (inc step) seed)))
+                                     (recur (inc step) seed)
+                                     [prime seed]))))
                              (recur (inc step) seed))))]
       (if prime [prime seed] (recur seed)))))
 
 (defn generate-kblock-key
+  "Generates an RSA private key of a given bit-length."
   [bit-length seed]
   {:pre [(even? bit-length)]}
   (loop [seed seed]
-    (let [[n p q seed] (some #(when (== bit-length (.bitLength (first %))) %)
-                         (iterate #(let [[_ _ _ seed] %
-                                         [p seed] (generate-prime
-                                                    (quot bit-length 2) seed)
-                                         [q seed] (generate-prime
-                                                    (quot bit-length 2) seed)
-                                         [p q] (sort [p q])
-                                         n (* p q)]
-                                     [n p q seed])
-                           [(bigint 0) 0 0 seed]))
+    (let [[n p q seed] (first
+                         (filter #(== bit-length (.bitLength (first %)))
+                           (iterate #(let [[_ _ _ seed] %
+                                           [p seed] (generate-prime
+                                                      (quot bit-length 2) seed)
+                                           [q seed] (generate-prime
+                                                      (quot bit-length 2) seed)
+                                           [p q] (sort [p q])
+                                           n (* p q)]
+                                       [n p q seed])
+                             [(bigint 0) 0 0 seed])))
           t1 (dec p)
           t2 (dec q)
           phi (* t1 t2)
           g (.gcd t1 t2)
           f (quot phi g)
-          e (bigint (some #(when (== 1 (.gcd phi (bigint %))) %)
-                      (iterate (partial + 2) 257)))]
+          e (bigint (first (filter #(== 1 (.gcd phi (bigint %)))
+                             (iterate (partial + 2) 257))))]
       (let [private-key (try
-                  (let [d (.modInverse e f)
-                        u (.modInverse p q)]
-                    (make-rsa-private-key e n p q d u (.mod d t1) (.mod d t2)))
-                  (catch Exception e nil))]
+                          (let [d (.modInverse e f)
+                                u (.modInverse p q)]
+                            (make-rsa-private-key
+                              e
+                              n
+                              p
+                              q
+                              d
+                              u
+                              (.mod d t1)
+                              (.mod d t2)))
+                          (catch Exception e nil))]
         (if private-key private-key (recur seed))))))
 
 (def small-primes [
