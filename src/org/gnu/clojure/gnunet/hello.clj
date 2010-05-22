@@ -8,13 +8,13 @@
   [transport]
   (concat
     (encode-utf8 (:name transport))
-    (encode-int32 (count (:bytes transport)))
+    (encode-int16 (count (:bytes transport)))
     (encode-date (:expiration transport))
     (:bytes transport)))
 
 (def parse-transport
   (domonad parser-m [name- parse-utf8
-                     address-length parse-uint32
+                     address-length parse-uint16
                      expiration parse-date
                      encoded-address (items address-length)]
     {:name name-
