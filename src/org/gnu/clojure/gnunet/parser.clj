@@ -26,6 +26,12 @@
                      :when (p x)]
     x))
 
+(defn match-one
+  "Match the first in a list of parsers."
+  [& mvs]
+  (with-monad parser-m
+    (apply m-plus mvs)))
+
 (defn optional
   "Makes a parser optional."
   [mv]
