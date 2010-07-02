@@ -1,5 +1,5 @@
 (ns org.gnu.clojure.gnunet.peer
-  (:use (org.gnu.clojure.gnunet identity))
+  (:use (org.gnu.clojure.gnunet identity hello))
   (:import java.util.Date))
 
 (defstruct remote-peer
@@ -27,19 +27,18 @@
   (struct-map peer
     :public-key (.getPublic (:keypair options))
     :id (generate-id (.getPublic (:keypair options)))
-    :transports-agent (agent [])
+    :transports-agent (agent {})
     :private-key (.getPrivate (:keypair options))
     :remote-peers-agent (agent {})))
-
-(def filter-expired-transports
-  (partial filter #(< (:expiration %) (Date.))))
 
 ;; Event - Peer receives a HELLO message
 (defn admit-hello!
   [peer hello]
   (letfn [(update-transports
             [transports new-transports]
-            (filter-expired-transports (concat transports new-transports)))
+            (merge-transports (Date.)
+              transports
+              (list-transports new-transports)))
           (update-remote-peers
             [remote-peers hello]
             (let [id (vec (generate-id (:public-key hello)))
