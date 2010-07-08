@@ -91,7 +91,8 @@
 (defn encode-message
   [msg]
   (concat
-    (encode-header (+ (count (:bytes msg)) header-size) (:message-type msg))
+    (encode-header {:size (+ header-size (count (:bytes msg)))
+                    :message-type (:message-type msg)})
     (:bytes msg)))
 
 (def parse-message

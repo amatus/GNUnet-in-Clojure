@@ -1,6 +1,6 @@
 (ns org.gnu.clojure.gnunet.peer
-  (:use (org.gnu.clojure.gnunet identity hello))
-  (:import java.util.Date))
+  (:use (org.gnu.clojure.gnunet identity hello hostlist))
+  (:import (java.util Date TimerTask)))
 
 (defstruct remote-peer
   :public-key
@@ -52,3 +52,8 @@
                   remote-peers)
                 (assoc remote-peers id (new-remote-peer-from-hello hello)))))]
     (send (:remote-peers-agent peer) update-remote-peers hello)))
+
+(defn create-hostlist-timer-task
+  [peer url]
+  (proxy [java.util.TimerTask] []
+    (run [] (download-hostlist (partial admit-hello! peer) url))))
