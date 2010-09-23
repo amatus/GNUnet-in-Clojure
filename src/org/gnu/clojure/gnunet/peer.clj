@@ -1,11 +1,13 @@
 (ns org.gnu.clojure.gnunet.peer
-  (:use (org.gnu.clojure.gnunet identity hello hostlist))
-  (:import (java.util Date TimerTask)))
+  (:use (org.gnu.clojure.gnunet identity)))
 
 (defstruct remote-peer
-  :public-key
-  :id
-  :transports-agent)
+  :public-key         ;; java.security.PublicKey
+  :id                 ;; 64 byte (512-bit) sequence
+  :transports-agent)  ;; agent of a map associating transport names (strings) to
+                      ;; maps associating transport addresses (usually
+                      ;; java.net.InetSocketAddress) to expiration times
+                      ;; (java.util.Date)
 
 (defn new-remote-peer-from-hello
   [hello]
@@ -17,8 +19,8 @@
 (def peer (apply create-struct (concat
   (keys (struct-map remote-peer))
   (list
-    :private-key
-    :remote-peers-agent))))
+    :private-key            ;; java.security.PrivateKey
+    :remote-peers-agent)))) ;; agent of a map of peer IDs to struct remote-peer
 
 (defstruct peer-options
   :keypair)
@@ -30,30 +32,3 @@
     :transports-agent (agent {})
     :private-key (.getPrivate (:keypair options))
     :remote-peers-agent (agent {})))
-
-;; Event - Peer receives a HELLO message
-(defn admit-hello!
-  [peer hello]
-  (letfn [(update-transports
-            [transports new-transports]
-            (merge-transports (Date.)
-              transports
-              (list-transports new-transports)))
-          (update-remote-peers
-            [remote-peers hello]
-            (let [id (vec (generate-id (:public-key hello)))
-                  remote-peer (remote-peers id)]
-              (if remote-peer
-                (do
-                  (send
-                    (:transports-agent remote-peer)
-                    update-transports
-                    (:transports hello))
-                  remote-peers)
-                (assoc remote-peers id (new-remote-peer-from-hello hello)))))]
-    (send (:remote-peers-agent peer) update-remote-peers hello)))
-
-(defn create-hostlist-timer-task
-  [peer url]
-  (proxy [java.util.TimerTask] []
-    (run [] (download-hostlist (partial admit-hello! peer) url))))
