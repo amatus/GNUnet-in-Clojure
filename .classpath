@@ -2,8 +2,8 @@
 <classpath>
 	<classpathentry kind="src" path="src"/>
 	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
-	<classpathentry kind="lib" path="/u/home/amatus/gnunet/gnunet/clojure.jar" sourcepath="/u/home/amatus/gnunet/gnunet/clojure-src.jar"/>
-	<classpathentry kind="lib" path="/u/home/amatus/gnunet/gnunet/clojure-contrib.jar" sourcepath="/u/home/amatus/gnunet/gnunet/clojure-contrib-src.jar"/>
 	<classpathentry kind="lib" path="/u/home/amatus/gnunet/gnunet/classes"/>
+	<classpathentry kind="lib" path="clojure.jar"/>
+	<classpathentry kind="lib" path="clojure-contrib.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>
