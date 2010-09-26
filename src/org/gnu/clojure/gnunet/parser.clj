@@ -63,7 +63,7 @@
   [mv n]
   (fn [s]
     (when-let [xs ((parser-m-until
-                    #(>= (first %) n)
+                    #(<= n (first %))
                     #(fn [s]
                        (when-let [xs (mv s)]
                          [[(inc (first %)) (conj (second %) (first xs))]

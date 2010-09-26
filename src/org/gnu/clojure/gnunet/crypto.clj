@@ -55,10 +55,9 @@
                      e (parse-uint (- len sizen 4))
                      :when (try
                              (do (make-rsa-public-key n e) true)
-                             (catch Exception e false)
-                             )
+                             (catch Exception e false))
                      padding parse-uint16
-                     :when (== padding 0)]
+                     :when (== 0 padding)]
     (make-rsa-public-key n e)))
 
 (defn
@@ -82,7 +81,7 @@
 (defn fermat-compositeness-test
   "Perform Fermat's Compositeness Test on the given bigint."
   [number]
-  (not (== (.modPow (bigint 2) (dec number) number) 1)))
+  (not (== 1 (.modPow (bigint 2) (dec number) number))))
 
 (defn miller-rabin-compositeness-test
   "Perform the Miller-Rabin Compositeness Test on the given bigint with the

@@ -62,8 +62,7 @@
 
 (def parse-utf8
   (domonad parser-m [xs (none-or-more (is #(not (== 0 %))))
-                     zero item
-                     :when (== zero 0)]
+                     zero item]
     (String. (byte-array xs) "UTF-8")))
 
 (defn encode-date
