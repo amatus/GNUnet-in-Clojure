@@ -17,3 +17,9 @@
     (domonad parser-m [addr (items 4)
                        port  parse-uint16]
       (InetSocketAddress. (InetAddress/getByAddress (byte-array addr)) port))))
+
+(defn is-unicast-address
+  [address]
+  (and
+    (not (.isAnyLocalAddress address))
+    (not (.isMulticastAddress address))))

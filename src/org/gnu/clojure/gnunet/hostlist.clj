@@ -39,4 +39,4 @@
    peer."
   [peer url]
   (proxy [java.util.TimerTask] []
-    (run [] (download-hostlist (partial admit-hello! peer) url))))
+    (run [] (download-hostlist! (partial admit-hello! peer) url))))
