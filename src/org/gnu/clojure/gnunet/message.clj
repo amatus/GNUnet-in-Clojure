@@ -16,7 +16,7 @@
 (defn encode-int16
   "Convert a 16-bit integer to a sequence of bytes in network order."
   [x]
-  (list (byte (bit-shift-right x 8)) (byte (bit-and x 0xFF))))
+  (list (.byteValue (bit-shift-right x 8)) (.byteValue (bit-and x 0xFF))))
 
 (defn encode-int32
   "Convert a 32-bit integer to a sequence of bytes in network order."

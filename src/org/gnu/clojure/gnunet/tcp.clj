@@ -1,5 +1,5 @@
 (ns org.gnu.clojure.gnunet.tcp
-  (:use (org.gnu.clojure.gnunet identity parser) clojure.contrib.monads))
+  (:use (org.gnu.clojure.gnunet peer parser) clojure.contrib.monads))
 
 (def message-type-tcp-welcome 60)
 

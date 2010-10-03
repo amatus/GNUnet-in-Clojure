@@ -1,7 +1,7 @@
 (ns org.gnu.clojure.gnunet.inet
   (:use (org.gnu.clojure.gnunet parser message)
     clojure.contrib.monads)
-  (:import (java.net InetAddress InetSocketAddress)))
+  (:import (java.net InetAddress InetSocketAddress NetworkInterface)))
 
 (defn encode-address
   [inet-socket-address]
@@ -23,3 +23,9 @@
   (and
     (not (.isAnyLocalAddress address))
     (not (.isMulticastAddress address))))
+
+(defn get-local-addresses
+  []
+  (for [interface (enumeration-seq (NetworkInterface/getNetworkInterfaces))
+        address (enumeration-seq (.getInetAddresses interface))]
+    address))

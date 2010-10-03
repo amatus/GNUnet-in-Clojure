@@ -4,7 +4,9 @@
 (defn reader
   "Converts a java.io.InputStream into a lazy seq of bytes."
   [in]
-  (lazy-seq (let [c (.read in)] (when (>= c 0) (cons (byte c) (reader in))))))
+  (lazy-seq
+    (let [c (.read in)]
+      (when (>= c 0) (cons (.byteValue c) (reader in))))))
 
 (defn read-url
   "Open a URL and return a seq of its data."
