@@ -62,7 +62,7 @@
     :id (generate-id (:public-key hello))
     :transport-addresses-agent (agent (merge-transport-addresses {}
                                         (:transport-addresses hello)))
-    :connection-agent (agent nil)))
+    :connection-agent (agent {})))
 
 ;; Event - Peer receives a HELLO message
 (defn admit-hello!
@@ -119,7 +119,7 @@
   [peer remote-peer]
   (send (:connection-agent remote-peer)
     (fn [connection]
-      (if (nil? connection)
+      (if (contains? connection :transport)
         (let [{transport :transport address :address} (best-transport peer
                                                         remote-peer)]
           (do

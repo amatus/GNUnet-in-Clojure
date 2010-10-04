@@ -1,5 +1,6 @@
 (ns org.gnu.clojure.gnunet.peer
-  (:use (org.gnu.clojure.gnunet crypto message)))
+  (:use (org.gnu.clojure.gnunet crypto message))
+  (:import java.nio.channels.Selector))
 
 (defstruct remote-peer
   ;; java.security.PublicKey
@@ -13,7 +14,8 @@
   ;; (java.util.Date) :latency (int, if ever connected)}
   :transport-addresses-agent
   
-  ;; agent of ??
+  ;; agent of a map of {:transport (map from peer:transports-agent, if
+  ;; connection is in progress) :transport-name (String)}
   :connection-agent)
 
 (def peer (apply create-struct (concat
@@ -27,7 +29,10 @@
     
     ;; agent of a map of transport names (String) to maps of {:connect!
     ;; :emit-message!}
-    :transports-agent))))
+    :transports-agent
+    
+    ;; java.nio.channels.Selector
+    :selector))))
 
 (defstruct peer-options
   :keypair)
@@ -46,4 +51,5 @@
     :transport-addresses-agent (agent {})
     :private-key (.getPrivate (:keypair options))
     :remote-peers-agent (agent {})
-    :transports-agent (agent nil)))
+    :transports-agent (agent nil)
+    :selector (Selector/open)))
