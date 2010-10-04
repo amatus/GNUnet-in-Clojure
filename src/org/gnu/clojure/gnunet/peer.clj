@@ -11,7 +11,7 @@
   ;; agent of a map associating transport names (strings) to maps associating
   ;; transport addresses (byte vector) to maps containing {:expiration
   ;; (java.util.Date) :latency (int, if ever connected)}
-  :transports-agent
+  :transport-addresses-agent
   
   ;; agent of ??
   :connection-agent)
@@ -23,7 +23,11 @@
     :private-key
     
     ;; agent of a map of peer IDs to struct remote-peer
-    :remote-peers-agent))))
+    :remote-peers-agent
+    
+    ;; agent of a map of transport names (String) to maps of {:connect!
+    ;; :emit-message!}
+    :transports-agent))))
 
 (defstruct peer-options
   :keypair)
@@ -39,6 +43,7 @@
   (struct-map peer
     :public-key (.getPublic (:keypair options))
     :id (generate-id (.getPublic (:keypair options)))
-    :transports-agent (agent {})
+    :transport-addresses-agent (agent {})
     :private-key (.getPrivate (:keypair options))
-    :remote-peers-agent (agent {})))
+    :remote-peers-agent (agent {})
+    :transports-agent (agent nil)))

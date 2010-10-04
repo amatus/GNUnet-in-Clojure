@@ -5,19 +5,19 @@
 
 (defn configure-udp-addresses!
   "Adds new addresses for the udp transport to peer's transports-agent expiring
-   in 30 days and removes expired addresses." 
-  [peer addresses port]
-  (send (:transports-agent peer)
-    (fn [transports]
-      (merge-transports {}
-        (expire-transports (Date.)
-          (concat (list-transports transports)
-            (for [address addresses]
-              {:name "udp"
+   in 12 hours and removes expired addresses." 
+  [peer local-addresses port]
+  (send (:transport-addresses-agent peer)
+    (fn [addresses]
+      (merge-transport-addresses {}
+        (expire-transport-addresses (Date.)
+          (concat (list-transport-addresses addresses)
+            (for [address local-addresses]
+              {:transport "udp"
                :encoded-address (encode-address (InetSocketAddress. address
                                                   port))
                :expiration (.getTime (doto (Calendar/getInstance)
-                                       (.add Calendar/DAY_OF_MONTH 30)))})))))))
+                                       (.add Calendar/HOUR_OF_DAY 12)))})))))))
 
 (defn pick-address
   [addresses]
@@ -26,7 +26,7 @@
                            parsed-addresses)]
   (first usable-addresses)))
 
-(defn udp-send!
+(defn emit-message-udp!
   [remote-peer addresses encoded-message]
   (let [address (pick-address addresses)]
     ))
@@ -35,3 +35,15 @@
   (domonad parser-m [peer-id (parse-uint id-size)
                      messages (none-or-more parse-message)]
     {:peer-id peer-id :messages messages}))
+
+(defn connect-udp!
+  [peer remote-peer address]
+  )
+
+(defn activate-udp!
+  [peer]
+  (send (:transports-agent peer)
+    (fn [transports]
+      (assoc transports "udp"
+        {:connect! connect-udp!
+         :emit-message! emit-message-udp!}))))

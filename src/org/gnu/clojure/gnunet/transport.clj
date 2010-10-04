@@ -13,16 +13,16 @@
   [& coll]
   (last (sort (filter #(not (nil? %)) coll))))
 
-(defn list-transports
+(defn list-transport-addresses
   "Generate a list of transport descriptions."
-  [transport-map]
-  (for [transport transport-map
+  [addresses-map]
+  (for [transport addresses-map
         address (val transport)]
     (conj
-      {:name (key transport) :encoded-address (key address)}
+      {:transport (key transport) :encoded-address (key address)}
       (val address))))
 
-(defn merge-addresses
+(defn merge-address-info
   "Merge two address-info maps."
   [a b]
   (let [expiration (my-max (:expiration a) (:expiration b))
@@ -31,47 +31,49 @@
       {:expiration expiration :latency latency}
       {:expiration expiration})))
 
-(defn merge-transports
+(defn merge-transport-addresses
   "Merge a list of transport descriptions into a transports-agent map. The input
    list is generated from parse-hello or list-transports. The input map is
    described in peer.clj."
-  [transport-map transport-list]
-  (reduce (fn [transport-map transport]
-            (if-let [addresses (transport-map (:name transport))]
-              (if-let [address (addresses (:encoded-address transport))]
-                (assoc transport-map (:name transport)
-                  (assoc addresses (:encoded-address transport)
-                    (merge-addresses address transport)))
-                (assoc transport-map (:name transport)
-                  (assoc addresses (:encoded-address transport)
-                    (dissoc transport :name :encoded-address))))
-              (assoc transport-map (:name transport)
-                {(:encoded-address transport)
-                 (dissoc transport :name :encoded-address)})))
-    transport-map
-    transport-list))
+  [address-map address-list]
+  (reduce (fn [address-map new-address]
+            (if-let [transport (address-map (:transport new-address))]
+              (if-let [address-info (transport (:encoded-address new-address))]
+                (assoc address-map (:transport new-address)
+                  (assoc transport (:encoded-address new-address)
+                    (merge-address-info address-info new-address)))
+                (assoc address-map (:transport new-address)
+                  (assoc transport (:encoded-address new-address)
+                    (dissoc new-address :transport :encoded-address))))
+              (assoc address-map (:transport new-address)
+                {(:encoded-address new-address)
+                 (dissoc new-address :transport :encoded-address)})))
+    address-map
+    address-list))
 
-(defn expire-transports
-  [min-expiration transport-list]
-  (filter #(>= 0 (compare min-expiration (:expiration %))) transport-list))
+(defn expire-transport-addresses
+  [min-expiration addresses-list]
+  (filter #(>= 0 (compare min-expiration (:expiration %))) addresses-list))
 
 (defn new-remote-peer-from-hello
   [hello]
   (struct-map remote-peer
     :public-key (:public-key hello)
     :id (generate-id (:public-key hello))
-    :transports-agent (agent (merge-transports {} (:transports hello)))))
+    :transport-addresses-agent (agent (merge-transport-addresses {}
+                                        (:transport-addresses hello)))
+    :connection-agent (agent nil)))
 
 ;; Event - Peer receives a HELLO message
 (defn admit-hello!
   "Updates the remote-peers map with new information contained in a hello and
    expires old addresses."
   [peer hello]
-  (letfn [(update-transports
-            [transports new-transports]
-            (merge-transports {}
-              (expire-transports (Date.) (concat (list-transports transports)
-                                           new-transports))))
+  (letfn [(update-transport-addresses
+            [addresses new-addresses]
+            (merge-transport-addresses {}
+              (expire-transport-addresses (Date.)
+                (concat (list-transport-addresses addresses) new-addresses))))
           (update-remote-peers
             [remote-peers hello]
             (let [id (vec (generate-id (:public-key hello)))
@@ -79,9 +81,9 @@
               (if remote-peer
                 (do
                   (send
-                    (:transports-agent remote-peer)
-                    update-transports
-                    (:transports hello))
+                    (:transport-addresses-agent remote-peer)
+                    update-transport-addresses
+                    (:transport-addresses hello))
                   remote-peers)
                 (assoc remote-peers id (new-remote-peer-from-hello hello)))))]
     (send (:remote-peers-agent peer) update-remote-peers hello)))
@@ -100,21 +102,27 @@
     {:challenge challenge :peer-id peer-id}))
 
 (defn best-transport
-  [remote-peer]
-  (let [transports (deref (:transports-agent remote-peer))
-        current-transports (expire-transports (Date.) (list-transports
-                                                          transports))
-        usable-transports (filter #(contains? my-transports (key %))
-                            current-transports)
-        best (first usable-transports)]
-  [(my-transports (key best)) (val best)]))
-
-(defn send-message!
-  "Sends message to remote-peer."
-  [remote-peer message]
-  (let [[transport-send! addresses] (best-transport remote-peer)]
-    (transport-send! remote-peer addresses message)))
+  [peer remote-peer]
+  (let [addresses (deref (:transport-addressess-agent remote-peer))
+        current-addresses (expire-transport-addresses (Date.)
+                            (list-transport-addresses addresses))
+        transports (deref (:transports-agent peer))
+        usable-addresses (filter #(contains? transports (:transport %))
+                           current-addresses)
+        sorted-addresses (sort-by #(if-let [latency (:latency %)] latency 0)
+                           usable-addresses)
+        best (first sorted-addresses)]
+  {:address best
+   :transport (transports (:transport best))}))
 
 (defn connect-to-peer!
-  [remote-peer]
-  )
+  [peer remote-peer]
+  (send (:connection-agent remote-peer)
+    (fn [connection]
+      (if (nil? connection)
+        (let [{transport :transport address :address} (best-transport peer
+                                                        remote-peer)]
+          (do
+            ((:connect! transport) peer remote-peer address)
+            {:transport transport
+             :transport-name (:transport address)}))))))
