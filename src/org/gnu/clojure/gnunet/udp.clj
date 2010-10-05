@@ -2,8 +2,11 @@
   (:use (org.gnu.clojure.gnunet inet parser message peer transport)
     clojure.contrib.monads)
   (:import (java.util Date Calendar)
-    java.net.InetSocketAddress
-    (java.nio.channels DatagramChannel SelectionKey)))
+    (java.net InetSocketAddress DatagramPacket)
+    (java.nio.channels DatagramChannel SelectionKey)
+    java.nio.ByteBuffer))
+
+(def max-udp-packet-length 65536)
 
 (defn configure-udp-addresses!
   "Adds new addresses for the udp transport to peer's transports-agent expiring
@@ -43,24 +46,38 @@
   )
 
 (defn admit-message-udp!
-  [peer socket]
-  )
+  [peer datagram-channel]
+  (let [byte-buffer (doto (ByteBuffer/allocate max-udp-packet-length) (.clear))
+        source-address (.receive datagram-channel byte-buffer)]
+    (.flip byte-buffer)
+    (let [string-builder (StringBuilder. "Received packet of length ")]
+      (.append string-builder (.limit byte-buffer))
+      (.append string-builder " from ")
+      (.append string-builder source-address)
+      (.append string-builder "\n")
+      (.write *out* (.toString string-builder)))
+  ))
+
+(defn register-datagram-channel!
+  [peer port]
+  (let [datagram-channel (DatagramChannel/open)
+        socket (.socket datagram-channel)]
+    (.configureBlocking datagram-channel false)
+    (.bind socket (InetSocketAddress. port))
+    (let [selection-key (.register datagram-channel
+                          (:selector peer)
+                          SelectionKey/OP_READ
+                          (partial admit-message-udp! peer datagram-channel))]
+      (send (:transports-agent peer)
+        (fn [transports]
+          (assoc transports "udp"
+            {:connect! connect-udp!
+             :emit-message! emit-message-udp!
+             :socket socket
+             :selection-key selection-key}))))))
 
 (defn activate-udp!
   [peer port]
-  (let [datagram-channel (DatagramChannel/open)
-        socket (.socket datagram-channel)
-        selection-key (do
-                        (.configureBlocking datagram-channel false)
-                        (.bind socket (InetSocketAddress. port))
-                        (.register datagram-channel
-                          (:selector peer)
-                          SelectionKey/OP_READ
-                          (partial admit-message-udp! peer socket)))]
-  (send (:transports-agent peer)
-    (fn [transports]
-      (assoc transports "udp"
-        {:connect! connect-udp!
-         :emit-message! emit-message-udp!
-         :socket socket
-         :selection-key selection-key})))))
+  (dosync (alter (:selector-continuations-ref peer)
+            conj (partial register-datagram-channel! peer port)))
+  (.wakeup (:selector peer)))
