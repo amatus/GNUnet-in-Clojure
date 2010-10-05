@@ -42,6 +42,10 @@
   [peer remote-peer address]
   )
 
+(defn admit-message-udp!
+  [peer socket]
+  )
+
 (defn activate-udp!
   [peer port]
   (let [datagram-channel (DatagramChannel/open)
@@ -52,7 +56,7 @@
                         (.register datagram-channel
                           (:selector peer)
                           SelectionKey/OP_READ
-                          nil))]
+                          (partial admit-message-udp! peer socket)))]
   (send (:transports-agent peer)
     (fn [transports]
       (assoc transports "udp"

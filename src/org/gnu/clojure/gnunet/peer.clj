@@ -32,7 +32,10 @@
     :transports-agent
     
     ;; java.nio.channels.Selector
-    :selector))))
+    :selector
+    
+    ;; Thread which selects on :selector
+    :selector-thread))))
 
 (defstruct peer-options
   :keypair)
@@ -44,12 +47,23 @@
 
 (def id-size (count (sha-512 ())))
 
+(defn selector-loop
+  [selector]
+  (.select selector)
+  (let [selected-keys (.selectedKeys selector)]
+    (for [selection-key (enumeration-seq (.iterator selected-keys))]
+      ((.attachment selection-key)))
+    (.clear selected-keys))
+  (recur selector))
+
 (defn new-peer [options]
-  (struct-map peer
-    :public-key (.getPublic (:keypair options))
-    :id (generate-id (.getPublic (:keypair options)))
-    :transport-addresses-agent (agent {})
-    :private-key (.getPrivate (:keypair options))
-    :remote-peers-agent (agent {})
-    :transports-agent (agent nil)
-    :selector (Selector/open)))
+  (let [selector (Selector/open)]
+    (struct-map peer
+      :public-key (.getPublic (:keypair options))
+      :id (generate-id (.getPublic (:keypair options)))
+      :transport-addresses-agent (agent {})
+      :private-key (.getPrivate (:keypair options))
+      :remote-peers-agent (agent {})
+      :transports-agent (agent nil)
+      :selector selector
+      :selector-thread (Thread. (partial selector-loop selector))))
