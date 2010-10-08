@@ -1,6 +1,8 @@
 (ns org.gnu.clojure.gnunet.peer
-  (:use (org.gnu.clojure.gnunet crypto message))
-  (:import java.nio.channels.Selector))
+  (:use (org.gnu.clojure.gnunet crypto message util))
+  (:import java.nio.channels.Selector
+    java.util.concurrent.ConcurrentLinkedQueue
+    java.security.SecureRandom))
 
 (defstruct remote-peer
   ;; java.security.PublicKey
@@ -11,11 +13,12 @@
   
   ;; agent of a map associating transport names (strings) to maps associating
   ;; transport addresses (byte vector) to maps containing {:expiration
-  ;; (java.util.Date) :latency (int, if ever connected)}
+  ;; (java.util.Date) :latency (int, if validated)}
   :transport-addresses-agent
   
   ;; agent of a map of {:transport (map from peer:transports-agent, if
-  ;; connection is in progress) :transport-name (String)}
+  ;; connection is in progress) :address (single map form of address from
+  ;; :transport-addresses-agent)}
   :connection-agent)
 
 (def peer (apply create-struct (concat
@@ -37,10 +40,13 @@
     ;; Thread which selects on :selector
     :selector-thread
     
-    ;; ref of list of continuations, in order to access the selector while the
-    ;; selector-thread is running append a continuation to this list and call
-    ;; .wakeup on the selector
-    :selector-continuations-ref))))
+    ;; java.util.concurrent.ConcurrentLinkedQueue of continuations, in order to
+    ;; access the selector while the selector-thread is running add a
+    ;; continuation to this queue and call .wakeup on the selector
+    :selector-continuations-queue
+    
+    ;; java.security.SecureRandom
+    :random))))
 
 (defstruct peer-options
   :keypair)
@@ -52,24 +58,20 @@
 
 (def id-size (count (sha-512 ())))
 
-(defn selector-loop
+(defn selector-loop!
   [selector continuations]
-  (let [pending (ref '())]
-    (dosync
-      (alter pending #(identity %2) (deref continuations))
-      (alter continuations #(identity %2) '()))
-    (doseq [continuation (deref pending)]
-      (continuation)))
+  (doseq [continuation (queue-seq! continuations)]
+    (continuation))
   (.select selector)
   (let [selected-keys (.selectedKeys selector)]
     (doseq [selection-key selected-keys]
-      ((.attachment selection-key)))
+      ((.attachment selection-key) selection-key))
     (.clear selected-keys))
   (recur selector continuations))
 
 (defn new-peer [options]
   (let [selector (Selector/open)
-        continuations (ref '())]
+        continuations (ConcurrentLinkedQueue.)]
     (struct-map peer
       :public-key (.getPublic (:keypair options))
       :id (generate-id (.getPublic (:keypair options)))
@@ -78,5 +80,6 @@
       :remote-peers-agent (agent {})
       :transports-agent (agent nil)
       :selector selector
-      :selector-thread (Thread. (partial selector-loop selector continuations))
-      :selector-continuations-ref continuations)))
+      :selector-thread (Thread. (partial selector-loop! selector continuations))
+      :selector-continuations-queue continuations
+      :random (SecureRandom.))))

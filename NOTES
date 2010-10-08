@@ -1,0 +1,7 @@
+(use '(org.gnu.clojure.gnunet crypto hello hostlist inet iostream message parser peer tcp transport udp util))
+(def keypair (generate-rsa-keypair))
+(def my-peer (new-peer {:keypair keypair}))
+(.start (:selector-thread my-peer))
+(activate-udp! my-peer 5678)
+(configure-udp-addresses! my-peer (get-local-addresses) 5678)
+(download-hostlist! (partial admit-hello! my-peer) "http://192.168.8.2:58080")
