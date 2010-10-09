@@ -5,6 +5,11 @@
   [queue]
   (lazy-seq (when-let [c (.poll queue)] (cons c (queue-seq! queue)))))
 
+(defn buffer-seq!
+  [buffer]
+  (lazy-seq (when (.hasRemaining buffer)
+              (cons (.get buffer) (buffer-seq! buffer)))))
+  
 (defn my-max
   "Return the maximum in a collection of comparable values."
   [& coll]

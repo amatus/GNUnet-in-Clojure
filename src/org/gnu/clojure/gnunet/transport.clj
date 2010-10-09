@@ -116,7 +116,7 @@
     (if-let [transport ((deref (:transports-agent peer))
                          (:transport address))]
       (let [challenge (.nextInt (:random peer))]
-        ((:emit-messages! transport) remote-peer (:encoded-address address)
+        ((:emit-messages! transport) transport (:encoded-address address)
           [(hello-for-peer-message peer)
            (ping-message remote-peer address challenge)])
         (conj address
@@ -146,8 +146,6 @@
         (send (:remote-peers-agent peer) update-remote-peers peer-id hello)
         (send (:remote-peers-agent peer) verify-remote-peers peer)))))
 
-
-
 (defn best-transport
   [peer remote-peer]
   (let [addresses (deref (:transport-addressess-agent remote-peer))
@@ -173,3 +171,14 @@
                                                         remote-peer)]
           (conj {:transport transport :address address}
             ((:connect! transport) peer remote-peer address)))))))
+
+(defn admit-message!
+  [peer sender-id source-address message]
+  (let [string-builder (StringBuilder. "Received message type ")]
+      (.append string-builder (:message-type message))
+      (.append string-builder " from ")
+      (.append string-builder source-address)
+      (.append string-builder " id ")
+      (.append string-builder sender-id)
+      (.append string-builder "\n")
+      (.write *out* (.toString string-builder))))
