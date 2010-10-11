@@ -1,9 +1,14 @@
 (ns org.gnu.clojure.gnunet.transport
-  (:use (org.gnu.clojure.gnunet parser message hello peer util)
+  (:use (org.gnu.clojure.gnunet parser message hello peer util crypto)
     clojure.contrib.monads)
   (:import (java.util Date Calendar)))
 
+(defn hello-address-expiration
+  []
+  (.getTime (doto (Calendar/getInstance) (.add Calendar/HOUR_OF_DAY 12))))
+
 (def message-type-ping 32)
+(def message-type-pong 33)
 
 (defn encode-ping
   [ping]
@@ -21,6 +26,51 @@
                      transport (optional parse-utf8)
                      encoded-address (none-or-more item)]
     {:challenge challenge
+     :peer-id peer-id
+     :transport transport
+     :encoded-address encoded-address}))
+
+(defn encode-pong
+  [pong]
+  (let [transport (encode-utf8 (:transport pong))
+        address-length (+ (count transport) (count (:encoded-address pong)))]
+    (concat
+      (encode-int32 (:challenge pong))
+      (:signature pong)
+      (encode-int32 (:signature-size pong))
+      (encode-int32 (:signature-purpose pong))
+      (encode-date (:expiration pong))
+      (:peer-id pong)
+      (encode-int32 address-length)
+      transport
+      (:encoded-address pong))))
+
+(def signature-purpose-transport-pong-own 1)
+(def signature-purpose-transport-pong-using 2)
+(def pong-signature-offset (+ 4 signature-size))
+
+(def parse-pong
+  (domonad parser-m [challenge parse-int32
+                     signature (items signature-size)
+                     signature-size parse-uint32
+                     signature-purpose parse-uint32
+                     expiration parse-date
+                     peer-id (items id-size)
+                     address-length parse-uint32
+                     transport parse-utf8
+                     :when (>= address-length (count (encode-utf8 transport))) 
+                     encoded-address (items
+                                       (- address-length
+                                         (count (encode-utf8 transport))))
+                     :when (= signature-size
+                             (+ 4 4 8 id-size 4 address-length))
+                     residue (none-or-more item)
+                     :when (= 0 (count residue))]
+    {:challenge challenge
+     :signature signature
+     :signature-size signature-size
+     :signature-purpose signature-purpose
+     :expiration expiration
      :peer-id peer-id
      :transport transport
      :encoded-address encoded-address}))
@@ -142,9 +192,14 @@
   [peer hello]
   (let [peer-id (generate-id (:public-key hello))]
     (if (not (= peer-id (:id peer)))
-      (do
-        (send (:remote-peers-agent peer) update-remote-peers peer-id hello)
-        (send (:remote-peers-agent peer) verify-remote-peers peer)))))
+      (let [remote-peers-agent (:remote-peers-agent peer)]
+        (send remote-peers-agent update-remote-peers peer-id hello)
+        (send remote-peers-agent verify-remote-peers peer)))))
+
+(defn handle-hello!
+  [peer message]
+  (when-let [hello (first (parse-hello (:bytes message)))]
+    (admit-hello! peer hello)))
 
 (defn best-transport
   [peer remote-peer]
@@ -172,6 +227,44 @@
           (conj {:transport transport :address address}
             ((:connect! transport) peer remote-peer address)))))))
 
+(defn handle-ping!
+  [peer sender-id source-address message]
+  
+  )
+
+(defn check-pending-validation
+  [addresses remote-peer pong encoded-pong]
+  (if-let [transport (addresses (:transport pong))]
+    (if-let [address (transport (:encoded-address pong))]
+      (cond
+        (not (= (:challenge address) (:challenge pong)))
+          addresses
+        (= signature-purpose-transport-pong-own (:signature-purpose pong))
+          (if (rsa-verify (:public-key remote-peer)
+                (drop pong-signature-offset encoded-pong)
+                (:signature pong))
+            (assoc addresses (:transport pong)
+              (assoc transport (:encoded-address pong)
+                {:expiration (hello-address-expiration)
+                 :latency (- (.getTime (Date.))
+                            (.getTime (:send-time address)))}))
+            addresses)
+        (= signature-purpose-transport-pong-using (:signature-purpose pong))
+          ;; TODO - fill in this case
+          addresses
+        :else addresses)
+      addresses)
+    addresses))
+
+(defn handle-pong!
+  [peer sender-id source-address message]
+  (when-let [pong (first (parse-pong (:bytes message)))]
+    (if (>= 0 (.compareTo (Date.) (:expiration pong)))
+      (when-let [remote-peer ((deref (:remote-peers-agent peer))
+                               (:peer-id pong))]
+        (send (:transport-addresses-agent remote-peer) check-pending-validation
+          remote-peer pong (:bytes message))))))
+
 (defn admit-message!
   [peer sender-id source-address message]
   (let [string-builder (StringBuilder. "Received message type ")]
@@ -181,4 +274,9 @@
       (.append string-builder " id ")
       (.append string-builder sender-id)
       (.append string-builder "\n")
-      (.write *out* (.toString string-builder))))
+      (.write *out* (.toString string-builder)))
+  (condp = (:message-type message)
+    message-type-hello (handle-hello! peer message)
+    message-type-ping (handle-ping! peer sender-id source-address message)
+    message-type-pong (handle-pong! peer sender-id source-address message)
+    nil))

@@ -1,10 +1,12 @@
 (ns org.gnu.clojure.gnunet.crypto
   (:use (org.gnu.clojure.gnunet parser message)
     clojure.contrib.monads)
-  (:import (java.security KeyPairGenerator KeyFactory MessageDigest)
+  (:import (java.security KeyPairGenerator KeyFactory MessageDigest Signature)
     (java.security.spec RSAKeyGenParameterSpec RSAPublicKeySpec
                         RSAPrivateCrtKeySpec)
     (java.math.BigInteger)))
+
+(def signature-size 256)
 
 (defn generate-rsa-keypair
   "Generate a 2048 bit RSA keypair."
@@ -27,6 +29,19 @@
   (let [keyfactory (KeyFactory/getInstance "RSA")
         keyspec (RSAPrivateCrtKeySpec. n e d p q dp dq u)]
     (.generatePrivate keyfactory keyspec)))
+
+(defn rsa-sign
+  [private-key bytes]
+  (.sign (doto (Signature/getInstance "SHA512withRSA")
+           (.initSign private-key)
+           (.update (byte-array bytes)))))
+
+(defn rsa-verify
+  [public-key bytes signature]
+  (.verify (doto (Signature/getInstance "SHA512withRSA")
+             (.initVerify public-key)
+             (.update (byte-array bytes)))
+    (byte-array signature))) 
 
 (defn sha-512
   "Compute the SHA-512 digest of a sequence of bytes."

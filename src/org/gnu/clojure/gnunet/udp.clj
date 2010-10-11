@@ -29,8 +29,8 @@
               {:sender-id (:id peer) :messages messages})}))
 
 (defn configure-udp-addresses!
-  "Adds new addresses for the udp transport to peer's transports-agent expiring
-   in 12 hours and removes expired addresses." 
+  "Adds new addresses for the udp transport to peer's transports-agent and
+   removes expired addresses." 
   [peer reachable-addresses port]
   (send (:transport-addresses-agent peer)
     (fn [addresses]
@@ -41,8 +41,7 @@
               {:transport "udp"
                :encoded-address (encode-address (InetSocketAddress. address
                                                   port))
-               :expiration (.getTime (doto (Calendar/getInstance)
-                                       (.add Calendar/HOUR_OF_DAY 12)))})))))))
+               :expiration (hello-address-expiration)})))))))
 
 (defn emit-messages-udp!
   [peer transport encoded-address messages]

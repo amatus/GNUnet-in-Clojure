@@ -46,6 +46,9 @@
 (def parse-uint32
   (domonad parser-m [xs (items 4)] (long (decode-uint xs))))
 
+(def parse-int32
+  (domonad parser-m [xs (items 4)] (.intValue (decode-uint xs))))
+
 (def parse-uint64
   (domonad parser-m [xs (items 8)] (decode-uint xs)))
 
