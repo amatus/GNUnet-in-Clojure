@@ -67,14 +67,15 @@
 (defn handle-channel-readable!
   [peer datagram-channel]
   (let [byte-buffer (doto (ByteBuffer/allocate max-udp-packet-length) (.clear))
-        source-address (.receive datagram-channel byte-buffer)]
+        source-address (.receive datagram-channel byte-buffer)
+        encoded-address (encode-address source-address)]
     (.flip byte-buffer)
     (when-let [{udp :message} (first ((parse-message-types
                                         {message-type-udp parse-udp})
                                        (buffer-seq! byte-buffer)))]
       (if (not (= (:sender-id udp) (seq (:id peer))))
         (doseq [message (:messages udp)]
-          (admit-message! peer (:sender-id udp) source-address message))))))
+          (admit-message! peer (:sender-id udp) encoded-address message))))))
 
 (defn handle-channel-selected!
   [peer datagram-channel selection-key]

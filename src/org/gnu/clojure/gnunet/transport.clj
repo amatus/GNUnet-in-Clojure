@@ -7,6 +7,10 @@
   []
   (.getTime (doto (Calendar/getInstance) (.add Calendar/HOUR_OF_DAY 12))))
 
+(defn pong-expiration
+  []
+  (.getTime (doto (Calendar/getInstance) (.add Calendar/HOUR_OF_DAY 1))))
+
 (def message-type-ping 32)
 (def message-type-pong 33)
 
@@ -14,7 +18,7 @@
   [ping]
   (concat
     (encode-int32 (:challenge ping))
-    (encode-int (:peer-id ping))
+    (:peer-id ping)
     (if-let [transport (:transport ping)]
       (concat
         (encode-utf8 (:transport ping))
@@ -22,7 +26,7 @@
 
 (def parse-ping
   (domonad parser-m [challenge parse-uint32
-                     peer-id (parse-uint id-size)
+                     peer-id (items id-size)
                      transport (optional parse-utf8)
                      encoded-address (none-or-more item)]
     {:challenge challenge
@@ -45,9 +49,10 @@
       transport
       (:encoded-address pong))))
 
-(def signature-purpose-transport-pong-own 1)
-(def signature-purpose-transport-pong-using 2)
+(def signature-purpose-pong-own 1)
+(def signature-purpose-pong-using 2)
 (def pong-signature-offset (+ 4 signature-size))
+(def pong-signature-size (+ 4 4 8 id-size 4))
 
 (def parse-pong
   (domonad parser-m [challenge parse-int32
@@ -63,7 +68,7 @@
                                        (- address-length
                                          (count (encode-utf8 transport))))
                      :when (= signature-size
-                             (+ 4 4 8 id-size 4 address-length))
+                             (+ pong-signature-size address-length))
                      residue (none-or-more item)
                      :when (= 0 (count residue))]
     {:challenge challenge
@@ -227,10 +232,55 @@
           (conj {:transport transport :address address}
             ((:connect! transport) peer remote-peer address)))))))
 
-(defn handle-ping!
-  [peer sender-id source-address message]
-  
+(defn send-pong-own!
+  [peer sender-id encoded-address ping]
+  (if-let [transport ((deref (:transport-addresses-agent peer))
+                       (:transport ping))]
+    ;; XXX: Here we're looking for an exact match, gnunet allows transport
+    ;; plugins to do inexact matches.
+    (if (contains? transport (:encoded-address ping))
+      (let [expiration (pong-expiration)
+            address-size (+ (count (encode-utf8 (:transport ping)))
+                           (count (:encoded-address ping)))
+            skeliton-pong (encode-pong {:challenge 0
+                               :signature (repeat signature-size (byte 0))
+                               :signature-size (+ pong-signature-size
+                                                 address-size)
+                               :signature-purpose signature-purpose-pong-own
+                               :expiration expiration
+                               :peer-id (:id peer)
+                               :transport (:transport ping)
+                               :encoded-address (:encoded-address ping)})
+            signature (rsa-sign (:private-key peer)
+                        (drop pong-signature-offset skeliton-pong))
+            encoded-pong (encode-pong {:challenge (:challenge ping)
+                               :signature signature
+                               :signature-size (+ pong-signature-size
+                                                 address-size)
+                               :signature-purpose signature-purpose-pong-own
+                               :expiration expiration
+                               :peer-id (:id peer)
+                               :transport (:transport ping)
+                               :encoded-address (:encoded-address ping)})
+            transport ((deref (:transports-agent peer)) (:transport ping))]
+        ;; XXX: gnunet looks for a "reliable" connection for the pong, or it
+        ;; sends a pong to every known address, here we're just sending it back
+        ;; to where the transport said it came from.
+        ((:emit-messages! transport) transport encoded-address
+          [{:message-type message-type-pong :bytes encoded-pong}])))))
+
+(defn send-pong-using!
+  [peer sender-id encoded-address ping]
+  (.write *out* "We don't handle PONG_USING yet!\n")
   )
+
+(defn handle-ping!
+  [peer sender-id encoded-address message]
+  (when-let [ping (first (parse-ping (:bytes message)))]
+    (cond
+      (not (= (:peer-id ping) (seq (:id peer)))) nil
+      (:transport ping) (send-pong-own! peer sender-id encoded-address ping)
+      :else (send-pong-using! peer sender-id encoded-address ping))))
 
 (defn check-pending-validation
   [addresses remote-peer pong encoded-pong]
@@ -239,7 +289,7 @@
       (cond
         (not (= (:challenge address) (:challenge pong)))
           addresses
-        (= signature-purpose-transport-pong-own (:signature-purpose pong))
+        (= signature-purpose-pong-own (:signature-purpose pong))
           (if (rsa-verify (:public-key remote-peer)
                 (drop pong-signature-offset encoded-pong)
                 (:signature pong))
@@ -249,7 +299,7 @@
                  :latency (- (.getTime (Date.))
                             (.getTime (:send-time address)))}))
             addresses)
-        (= signature-purpose-transport-pong-using (:signature-purpose pong))
+        (= signature-purpose-pong-using (:signature-purpose pong))
           ;; TODO - fill in this case
           addresses
         :else addresses)
@@ -257,7 +307,7 @@
     addresses))
 
 (defn handle-pong!
-  [peer sender-id source-address message]
+  [peer message]
   (when-let [pong (first (parse-pong (:bytes message)))]
     (if (>= 0 (.compareTo (Date.) (:expiration pong)))
       (when-let [remote-peer ((deref (:remote-peers-agent peer))
@@ -266,17 +316,17 @@
           remote-peer pong (:bytes message))))))
 
 (defn admit-message!
-  [peer sender-id source-address message]
+  [peer sender-id encoded-address message]
   (let [string-builder (StringBuilder. "Received message type ")]
       (.append string-builder (:message-type message))
       (.append string-builder " from ")
-      (.append string-builder source-address)
+      (.append string-builder encoded-address)
       (.append string-builder " id ")
       (.append string-builder sender-id)
       (.append string-builder "\n")
       (.write *out* (.toString string-builder)))
   (condp = (:message-type message)
     message-type-hello (handle-hello! peer message)
-    message-type-ping (handle-ping! peer sender-id source-address message)
-    message-type-pong (handle-pong! peer sender-id source-address message)
+    message-type-ping (handle-ping! peer sender-id encoded-address message)
+    message-type-pong (handle-pong! peer message)
     nil))
