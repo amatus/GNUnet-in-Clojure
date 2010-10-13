@@ -131,7 +131,7 @@
   [peer]
   {:message-type message-type-hello
    :bytes (encode-hello
-            {:public-key (:public-key peer)
+            {:public-key (deref (:public-key-atom peer))
              :transport-addresses (list-transport-addresses
                                     (deref
                                       (:transport-addresses-agent peer)))})})
@@ -155,16 +155,16 @@
   (let [remote-peer (remote-peers peer-id)]
     (if remote-peer
       (do
+        (if (:public-key hello)
+          (swap! (:public-key-atom remote-peer)
+            #(if (nil? %) (:public-key hello))))
         (send (:transport-addresses-agent remote-peer)
           update-transport-addresses
           (:transport-addresses hello))
-        (if (:public-key remote-peer)
-          remote-peers
-          (assoc remote-peers peer-id
-            (assoc remote-peer :public-key (:public-key hello)))))
+        remote-peers)
       (assoc remote-peers peer-id
         (struct-map remote-peer-struct
-          :public-key (:public-key hello)
+          :public-key-atom (atom (:public-key hello))
           :id peer-id
           :transport-addresses-agent (agent
                                        (merge-transport-addresses {}
@@ -255,25 +255,26 @@
 
 (defn check-pending-validation
   [addresses remote-peer pong]
-  (if-let [transport (addresses (:transport pong))]
-    (if-let [address (transport (:encoded-address pong))]
-      (cond
-        (not (= (:challenge address) (:challenge pong)))
-          addresses
-        (= signature-purpose-pong-own (:signature-purpose pong))
-          (if (rsa-verify (:public-key remote-peer)
-                (:signed-material pong)
-                (:signature pong))
-            (assoc addresses (:transport pong)
-              (assoc transport (:encoded-address pong)
-                {:expiration (hello-address-expiration)
-                 :latency (- (.getTime (Date.))
-                            (.getTime (:send-time address)))}))
-            addresses)
-        (= signature-purpose-pong-using (:signature-purpose pong))
-          ;; TODO - fill in this case
-          addresses
-        :else addresses)
+  (if-let [public-key (deref (:public-key-atom remote-peer))]
+    (if-let [transport (addresses (:transport pong))]
+      (if-let [address (transport (:encoded-address pong))]
+        (cond
+          (not (= (:challenge address) (:challenge pong))) addresses
+          (= signature-purpose-pong-own (:signature-purpose pong))
+            (if (rsa-verify public-key
+                  (:signed-material pong)
+                  (:signature pong))
+              (assoc addresses (:transport pong)
+                (assoc transport (:encoded-address pong)
+                  {:expiration (hello-address-expiration)
+                   :latency (- (.getTime (Date.))
+                              (.getTime (:send-time address)))}))
+              addresses)
+          (= signature-purpose-pong-using (:signature-purpose pong))
+            ;; TODO - fill in this case
+            addresses
+          :else addresses)
+        addresses)
       addresses)
     addresses))
 

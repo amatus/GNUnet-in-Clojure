@@ -32,17 +32,17 @@
 
 (defn handle-set-key!
   [peer remote-peer message]
-  (when-let [set-key (first (parse-set-key (:bytes message)))]
-    (cond
-      (not (= (:peer-id set-key) (seq (:id peer)))) (.write *out* "SET_KEY not for me\n")
-      (not (rsa-verify (:public-key remote-peer)
-             (:signed-material set-key)
-             (:signature set-key))) (.write *out* "SET_KEY invalid signature\n")
-      :else (do (.write *out* "Set key message ")
-              (.write *out* (.toString set-key))
-              (.write *out* "\n"))
-      )
-  ))
+  (when-let [public-key (deref (:public-key-atom remote-peer))]
+    (when-let [set-key (first (parse-set-key (:bytes message)))]
+      (cond
+        (not (= (:peer-id set-key) (seq (:id peer)))) (.write *out* "SET_KEY not for me\n")
+        (not (rsa-verify public-key
+               (:signed-material set-key)
+               (:signature set-key))) (.write *out* "SET_KEY invalid signature\n")
+        :else (do (.write *out* "Set key message ")
+                (.write *out* (.toString set-key))
+                (.write *out* "\n"))
+        ))))
 
 (defn handle-receive!
   [peer remote-peer message]

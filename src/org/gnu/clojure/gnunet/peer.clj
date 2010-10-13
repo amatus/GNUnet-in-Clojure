@@ -5,8 +5,8 @@
     java.security.SecureRandom))
 
 (defstruct remote-peer-struct
-  ;; java.security.PublicKey
-  :public-key
+  ;; atom of java.security.PublicKey
+  :public-key-atom
   
   ;; 64 byte (512-bit) sequence
   :id
@@ -67,7 +67,7 @@
   (let [selector (Selector/open)
         continuations (ConcurrentLinkedQueue.)]
     (struct-map peer-struct
-      :public-key (.getPublic (:keypair options))
+      :public-key-atom (atom (.getPublic (:keypair options)))
       :id (generate-id (.getPublic (:keypair options)))
       :transport-addresses-agent (agent {})
       :private-key (.getPrivate (:keypair options))
