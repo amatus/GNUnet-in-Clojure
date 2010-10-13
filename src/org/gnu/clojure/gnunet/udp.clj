@@ -68,14 +68,16 @@
   [peer datagram-channel]
   (let [byte-buffer (doto (ByteBuffer/allocate max-udp-packet-length) (.clear))
         source-address (.receive datagram-channel byte-buffer)
-        encoded-address (encode-address source-address)]
+        address {:transport "udp"
+                 :encoded-address (encode-address source-address)
+                 :expiration (idle-connection-timeout)}]
     (.flip byte-buffer)
     (when-let [{udp :message} (first ((parse-message-types
                                         {message-type-udp parse-udp})
                                        (buffer-seq! byte-buffer)))]
-      (if (not (= (:sender-id udp) (seq (:id peer))))
+      (if (not (= (:sender-id udp) (:id peer)))
         (doseq [message (:messages udp)]
-          (admit-message! peer (:sender-id udp) encoded-address message))))))
+          (admit-message! peer (:sender-id udp) address message))))))
 
 (defn handle-channel-selected!
   [peer datagram-channel selection-key]
@@ -83,10 +85,6 @@
     (handle-channel-readable! peer datagram-channel))
   (if (.isWritable selection-key)
     (handle-channel-writable! peer datagram-channel)))
-
-(defn connect-udp!
-  [peer remote-peer address]
-  {:message-queue (ConcurrentLinkedQueue.)})
 
 (defn- register-datagram-channel!
   [peer port]
@@ -102,8 +100,7 @@
       (send (:transports-agent peer)
         (fn [transports]
           (assoc transports "udp"
-            {:connect! (partial connect-udp! peer)
-             :emit-messages! (partial emit-messages-udp! peer)
+            {:emit-messages! (partial emit-messages-udp! peer)
              :socket socket
              :selection-key selection-key
              :send-queue (ConcurrentLinkedQueue.)}))))))

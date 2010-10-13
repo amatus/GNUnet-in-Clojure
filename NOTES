@@ -1,4 +1,4 @@
-(use '(org.gnu.clojure.gnunet crypto hello hostlist inet iostream message parser peer tcp transport udp util))
+(use '(org.gnu.clojure.gnunet core crypto hello hostlist inet iostream message parser peer tcp transport udp util))
 (def keypair (generate-rsa-keypair))
 (def my-peer (new-peer {:keypair keypair}))
 (.start (:selector-thread my-peer))

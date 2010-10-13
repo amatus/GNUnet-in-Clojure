@@ -8,6 +8,33 @@
 
 (def signature-size 256)
 
+(defn encode-signed
+  [purpose inner-material]
+  (concat
+    (encode-int32 (+ 8 (count inner-material)))
+    (encode-int32 purpose)
+    inner-material))
+
+(defn parse-signed
+  "Produces a parser for a signed portion of a GNUnet message given a parser for
+   the contained signed material. The produced parser will fail if the given
+   parser does not successfully consume the entire signed material."
+  [signed-material-parser]
+  (fn
+    [input]
+    (when-let [[[size purpose inner-material] residue]
+               ((domonad parser-m [size parse-uint32
+                                   :when (<= 8 size)
+                                   purpose parse-uint32
+                                   inner-material (items (- size 8))]
+                  [size purpose inner-material]) input)]
+      (when-let [[parsed inner-residue]
+                 (signed-material-parser inner-material)]
+        (if (empty? inner-residue)
+          [{:purpose purpose
+            :signed-material (take size input)
+            :parsed parsed} residue])))))
+
 (defn generate-rsa-keypair
   "Generate a 2048 bit RSA keypair."
   []

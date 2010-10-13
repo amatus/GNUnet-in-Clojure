@@ -4,25 +4,20 @@
     java.util.concurrent.ConcurrentLinkedQueue
     java.security.SecureRandom))
 
-(defstruct remote-peer
+(defstruct remote-peer-struct
   ;; java.security.PublicKey
   :public-key
   
   ;; 64 byte (512-bit) sequence
   :id
   
-  ;; agent of a map associating transport names (strings) to maps associating
+  ;; agent of a map associating transport names (String) to maps associating
   ;; transport addresses (byte vector) to maps containing {:expiration
   ;; (java.util.Date) :latency (int, if validated)}
-  :transport-addresses-agent
-  
-  ;; agent of a map of {:transport (map from peer:transports-agent, if
-  ;; connection is in progress) :address (single map form of address from
-  ;; :transport-addresses-agent)}
-  :connection-agent)
+  :transport-addresses-agent)
 
-(def peer (apply create-struct (concat
-  (keys (struct-map remote-peer))
+(def peer-struct (apply create-struct (concat
+  (keys (struct-map remote-peer-struct))
   (list
     ;; java.security.PrivateKey
     :private-key
@@ -30,8 +25,7 @@
     ;; agent of a map of peer IDs to struct remote-peer
     :remote-peers-agent
     
-    ;; agent of a map of transport names (String) to maps of {:connect!
-    ;; :emit-message!}
+    ;; agent of a map of transport names (String) to maps of {:emit-message!}
     :transports-agent
     
     ;; java.nio.channels.Selector
@@ -54,7 +48,7 @@
 (defn generate-id
   "Generate the SHA-512 digest of the encoded public key."
   [public-key]
-  (sha-512 (encode-rsa-public-key public-key)))
+  (vec (sha-512 (encode-rsa-public-key public-key))))
 
 (def id-size (count (sha-512 ())))
 
@@ -72,7 +66,7 @@
 (defn new-peer [options]
   (let [selector (Selector/open)
         continuations (ConcurrentLinkedQueue.)]
-    (struct-map peer
+    (struct-map peer-struct
       :public-key (.getPublic (:keypair options))
       :id (generate-id (.getPublic (:keypair options)))
       :transport-addresses-agent (agent {})
