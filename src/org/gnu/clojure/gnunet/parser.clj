@@ -19,7 +19,7 @@
   [xs]
   (when (not (empty? xs)) [(first xs) (rest xs)]))
 
-(defn is
+(defn satisfy
   "Produces a parser that matches an item which satisfies the given predicate."
   [p]
   (domonad parser-m [x item

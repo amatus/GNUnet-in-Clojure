@@ -1,10 +1,11 @@
 (ns org.gnu.clojure.gnunet.crypto
   (:use (org.gnu.clojure.gnunet parser message)
-    clojure.contrib.monads)
+    clojure.contrib.monads clojure.test)
   (:import (java.security KeyPairGenerator KeyFactory MessageDigest Signature)
     (java.security.spec RSAKeyGenParameterSpec RSAPublicKeySpec
                         RSAPrivateCrtKeySpec)
-    (java.math.BigInteger)))
+    java.math.BigInteger
+    javax.crypto.Cipher))
 
 (def signature-size 256)
 
@@ -58,23 +59,38 @@
     (.generatePrivate keyfactory keyspec)))
 
 (defn rsa-sign
-  [private-key bytes]
+  [private-key byte-seq]
   (.sign (doto (Signature/getInstance "SHA512withRSA")
            (.initSign private-key)
-           (.update (byte-array bytes)))))
+           (.update (byte-array byte-seq)))))
 
 (defn rsa-verify
-  [public-key bytes signature]
+  [public-key byte-seq signature]
   (.verify (doto (Signature/getInstance "SHA512withRSA")
              (.initVerify public-key)
-             (.update (byte-array bytes)))
-    (byte-array signature))) 
+             (.update (byte-array byte-seq)))
+    (byte-array signature)))
+
+(defn rsa-encrypt!
+  [rsa-key byte-seq]
+  (.doFinal (doto (Cipher/getInstance "RSA")
+              (.init Cipher/ENCRYPT_MODE rsa-key))
+    (byte-array byte-seq)))
+
+(defn rsa-decrypt
+  [rsa-key byte-seq]
+  (.doFinal (doto (Cipher/getInstance "RSA")
+              (.init Cipher/DECRYPT_MODE rsa-key))
+    (byte-array byte-seq)))
 
 (defn sha-512
   "Compute the SHA-512 digest of a sequence of bytes."
-  [x]
-  (let [sha (MessageDigest/getInstance "SHA-512")]
-    (.digest sha (byte-array x))))
+  [byte-seq]
+  (.digest (MessageDigest/getInstance "SHA-512") (byte-array byte-seq)))
+
+(def rsa-modulus-length 256)
+(def rsa-exponent-length 2)
+(def rsa-key-length (+ rsa-modulus-length rsa-exponent-length))
 
 (defn encode-rsa-public-key
   "Convert an RSA public key to a sequence of bytes in gnunet format."
@@ -84,9 +100,11 @@
         exponent (encode-int (.getPublicExponent public-key))
         exponent-len (count exponent)]
     (concat
-      (encode-int16 (+ modulus-len exponent-len 4))
-      (encode-int16 modulus-len)
+      (encode-int16 (+ rsa-key-length 4))
+      (encode-int16 rsa-modulus-length)
+      (repeat (- rsa-modulus-length modulus-len) (byte 0))
       modulus
+      (repeat (- rsa-exponent-length exponent-len) (byte 0))
       exponent
       (encode-int16 0))))
 
@@ -95,20 +113,15 @@
                      sizen parse-uint16
                      n (parse-uint sizen)
                      e (parse-uint (- len sizen 4))
-                     :when (try
-                             (do (make-rsa-public-key n e) true)
-                             (catch Exception e false))
+                     :let [public-key (try (make-rsa-public-key n e)
+                                        (catch Exception e nil))]
+                     :when public-key
                      padding parse-uint16
                      :when (== 0 padding)]
-    (make-rsa-public-key n e)))
+    public-key))
 
-(defn
-  #^{:test (fn []
-             (let [seed (sha-512 [])
-                   [n seed] (random-int 1024 seed)]
-               (assert (== n 145722097586741401146081933101625908822609966371134029821236387730376760429245348048227251733217120026252986740857779434920617271166036248533631595465678498079543252354969108228859509711652038086980961685030673985343697554674529134136563684623116336979340330220033374478392520298004708077375018922611329202505))
-               (assert (= (seq seed) [-83 -57 -58 -86 82 42 91 -29 -56 -97 -36 -125 47 5 -57 120 48 -112 51 -103 26 113 29 126 -80 46 88 13 -23 -59 -15 49 -34 50 54 -99 -61 -106 -2 37 18 -103 -85 -98 -58 -4 33 -13 118 -112 125 -121 -43 43 19 11 -113 -116 59 14 37 66 56 2]))))}
-  random-int
+(with-test
+(defn random-int
   "Return a cryptographically weak random non-negative integer of the given
    bit-length."
   [bit-length seed]
@@ -119,7 +132,14 @@
         len (.bitLength number)
         number (reduce bit-clear number (range (dec len) (dec bit-length) -1))]
     [number (nth hashes cnt)]))
-
+(is (= (let [[n seed] (random-int 1024 (sha-512 []))]
+         [n (vec seed)])
+       [145722097586741401146081933101625908822609966371134029821236387730376760429245348048227251733217120026252986740857779434920617271166036248533631595465678498079543252354969108228859509711652038086980961685030673985343697554674529134136563684623116336979340330220033374478392520298004708077375018922611329202505
+        [-83 -57 -58 -86 82 42 91 -29 -56 -97 -36 -125 47 5 -57 120 48 -112 51
+         -103 26 113 29 126 -80 46 88 13 -23 -59 -15 49 -34 50 54 -99 -61 -106
+         -2 37 18 -103 -85 -98 -58 -4 33 -13 118 -112 125 -121 -43 43 19 11 -113
+         -116 59 14 37 66 56 2]])))
+  
 (defn fermat-compositeness-test
   "Perform Fermat's Compositeness Test on the given bigint."
   [number]
@@ -154,13 +174,8 @@
 
 (def small-primes)
 
-(defn
-  #^{:test (fn []
-             (let [seed (sha-512 [])
-                   [n seed] (generate-prime 1024 seed)]
-               (assert (== n 145722097586741401146081933101625908822609966371134029821236387730376760429245348048227251733217120026252986740857779434920617271166036248533631595465678498079543252354969108228859509711652038086980961685030673985343697554674529134136563684623116336979340330220033374478392520298004708077375018922611329203201))
-               (assert (= (seq seed) [-110 35 7 6 -114 -46 -94 -76 41 94 76 110 -116 9 -39 30 71 48 -55 -9 -95 -9 -117 -6 -31 -47 117 125 71 73 25 95 -100 50 123 -64 86 31 101 53 -89 33 -38 70 -77 15 -85 44 18 -5 -29 -4 -120 0 114 -79 81 -127 -102 102 126 -14 5 60]))))}
-  generate-prime
+(with-test
+(defn generate-prime
   "Generates a cryptographically weak random prime of the given bit-length."
   [bit-length seed]
   {:pre [(>= bit-length 32)]}
@@ -189,7 +204,15 @@
                                      [prime seed]))))
                              (recur (inc step) seed))))]
       (if prime [prime seed] (recur seed)))))
+(is (= (let [[prime seed] (generate-prime 1024 (sha-512 []))]
+         [prime (vec seed)])
+      [145722097586741401146081933101625908822609966371134029821236387730376760429245348048227251733217120026252986740857779434920617271166036248533631595465678498079543252354969108228859509711652038086980961685030673985343697554674529134136563684623116336979340330220033374478392520298004708077375018922611329203201
+       [-110 35 7 6 -114 -46 -94 -76 41 94 76 110 -116 9 -39 30 71 48 -55 -9 -95
+        -9 -117 -6 -31 -47 117 125 71 73 25 95 -100 50 123 -64 86 31 101 53 -89
+        33 -38 70 -77 15 -85 44 18 -5 -29 -4 -120 0 114 -79 81 -127 -102 102 126
+        -14 5 60]])))
 
+(with-test
 (defn generate-kblock-key
   "Generates an RSA private key of a given bit-length."
   [bit-length seed]
@@ -227,6 +250,20 @@
                               (.mod d t2)))
                           (catch Exception e nil))]
         (if private-key private-key (recur seed))))))
+(is (=
+      (encode-rsa-public-key
+        (generate-kblock-key 1024 (sha-512 (.getBytes "X" "utf-8"))))
+      [1 6 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+       0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+       0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+       0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -73 60 33 95 122 94 107 9 -66
+       -59 87 19 -55 1 120 108 9 50 74 21 9 -128 -32 20 -67 -80 -48 68 38 -109
+       73 41 -61 -76 -105 26 -105 17 -81 84 85 83 108 -42 -18 -72 -65 -96 4 -18
+       -112 73 114 -89 55 69 95 83 -57 82 -104 125 -116 -126 -73 85 -68 2 -120
+       43 68 -107 12 74 -51 -63 103 43 -89 76 59 -108 -40 26 76 30 -93 -41 78
+       119 0 -82 85 -108 -61 -92 -13 -59 89 -28 -65 -14 -33 104 68 -6 -61 2 -28
+       -74 97 117 -31 77 -56 -70 -45 -50 68 40 29 47 -20 26 26 -66 -16 99 1 1 0
+       0])))
 
 (def small-primes [
   3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43,

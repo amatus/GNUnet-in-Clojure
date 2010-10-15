@@ -8,13 +8,16 @@
   ;; atom of java.security.PublicKey
   :public-key-atom
   
-  ;; 64 byte (512-bit) sequence
+  ;; 64 byte (512-bit) vector
   :id
   
   ;; agent of a map associating transport names (String) to maps associating
   ;; transport addresses (byte vector) to maps containing {:expiration
   ;; (java.util.Date) :latency (int, if validated)}
-  :transport-addresses-agent)
+  :transport-addresses-agent
+  
+  ;; agent of a map of state used by core (nil for local peer?)
+  :core-state-agent)
 
 (def peer-struct (apply create-struct (concat
   (keys (struct-map remote-peer-struct))

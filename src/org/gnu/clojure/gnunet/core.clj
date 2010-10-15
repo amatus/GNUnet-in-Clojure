@@ -1,6 +1,7 @@
 (ns org.gnu.clojure.gnunet.core
   (:use (org.gnu.clojure.gnunet parser message peer crypto)
-    clojure.contrib.monads))
+    clojure.contrib.monads)
+  (:import java.util.Date))
 
 (def message-type-core-set-key 80)
 (def message-type-core-encrypted-message 81)
@@ -29,20 +30,27 @@
        :signature signature}
       (:parsed signed))))
 
-
 (defn handle-set-key!
   [peer remote-peer message]
-  (when-let [public-key (deref (:public-key-atom remote-peer))]
-    (when-let [set-key (first (parse-set-key (:bytes message)))]
-      (cond
-        (not (= (:peer-id set-key) (seq (:id peer)))) (.write *out* "SET_KEY not for me\n")
-        (not (rsa-verify public-key
-               (:signed-material set-key)
-               (:signature set-key))) (.write *out* "SET_KEY invalid signature\n")
-        :else (do (.write *out* "Set key message ")
-                (.write *out* (.toString set-key))
-                (.write *out* "\n"))
-        ))))
+  (send (:core-state-agent remote-peer)
+    (fn [state]
+      (if-let [public-key (deref (:public-key-atom remote-peer))]
+        (if-let [set-key (first (parse-set-key (:bytes message)))]
+          (let [status (state :status :status-down)
+                decrypt-key-created (state :decrypt-key-created (Date. 0))]
+            (cond
+              (not (= (:peer-id set-key) (seq (:id peer)))) state
+              (not (rsa-verify public-key
+                     (:signed-material set-key) (:signature set-key))) state
+              (and
+                (or (= status :status-key-received)
+                  (= status :status-key-confirmed))
+                (< (:creation-time set-key) decrypt-key-created)) state
+              :else (let [decrypt-key (rsa-decrypt (:private-key peer)
+                                        (:encrypted-key set-key))]
+                      state)))
+          state)
+        state))))
 
 (defn handle-receive!
   [peer remote-peer message]

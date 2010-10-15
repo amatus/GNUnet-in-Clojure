@@ -64,7 +64,7 @@
     (list (byte 0))))
 
 (def parse-utf8
-  (domonad parser-m [xs (none-or-more (is #(not (== 0 %))))
+  (domonad parser-m [xs (none-or-more (satisfy #(not (== 0 %))))
                      zero item]
     (String. (byte-array xs) "UTF-8")))
 
