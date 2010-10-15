@@ -55,7 +55,8 @@
   "Make an RSA private key from PKCS#1 values."
   [e n p q d u dp dq]
   (let [keyfactory (KeyFactory/getInstance "RSA")
-        keyspec (RSAPrivateCrtKeySpec. n e d p q dp dq u)]
+        ;; Swap p and q, in java q < p
+        keyspec (RSAPrivateCrtKeySpec. n e d q p dq dp u)]
     (.generatePrivate keyfactory keyspec)))
 
 (defn rsa-sign
