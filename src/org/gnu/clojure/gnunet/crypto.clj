@@ -5,9 +5,20 @@
     (java.security.spec RSAKeyGenParameterSpec RSAPublicKeySpec
                         RSAPrivateCrtKeySpec)
     java.math.BigInteger
-    javax.crypto.Cipher))
+    (javax.crypto Cipher SecretKeyFactory)
+    javax.crypto.spec.SecretKeySpec))
 
 (def signature-size 256)
+(def aes-key-size 32)
+(def aes-iv-size (/ aes-key-size 2))
+
+(defn generate-aes-key!
+  [random]
+  (let [buffer (byte-array (repeat aes-key-size (byte 0)))
+        _ (.nextBytes random buffer)
+        key-spec (SecretKeySpec. buffer "AES")
+        key-factory (SecretKeyFactory/getInstance "AES")]
+    (.generateSecret key-factory key-spec)))
 
 (defn encode-signed
   [purpose inner-material]
@@ -36,12 +47,12 @@
             :signed-material (take size input)
             :parsed parsed} residue])))))
 
-(defn generate-rsa-keypair
+(defn generate-rsa-keypair!
   "Generate a 2048 bit RSA keypair."
-  []
+  [random]
   (let [rsa (KeyPairGenerator/getInstance "RSA")
         spec (RSAKeyGenParameterSpec. 2048 (bigint 257))]
-    (.initialize rsa spec)
+    (.initialize rsa spec random)
     (.generateKeyPair rsa)))
 
 (defn make-rsa-public-key
@@ -73,16 +84,18 @@
     (byte-array signature)))
 
 (defn rsa-encrypt!
-  [rsa-key byte-seq]
+  [rsa-key byte-seq random]
   (.doFinal (doto (Cipher/getInstance "RSA")
-              (.init Cipher/ENCRYPT_MODE rsa-key))
+              (.init Cipher/ENCRYPT_MODE rsa-key random))
     (byte-array byte-seq)))
 
 (defn rsa-decrypt
   [rsa-key byte-seq]
-  (.doFinal (doto (Cipher/getInstance "RSA")
-              (.init Cipher/DECRYPT_MODE rsa-key))
-    (byte-array byte-seq)))
+  (try
+    (.doFinal (doto (Cipher/getInstance "RSA")
+                (.init Cipher/DECRYPT_MODE rsa-key))
+      (byte-array byte-seq))
+    (catch Exception e nil)))
 
 (defn sha-512
   "Compute the SHA-512 digest of a sequence of bytes."

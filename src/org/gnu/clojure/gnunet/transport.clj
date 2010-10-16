@@ -169,7 +169,7 @@
           :transport-addresses-agent (agent
                                        (merge-transport-addresses {}
                                          (:transport-addresses hello)))
-          :core-state-agent (agent {}))))))
+          :state-agent (agent {}))))))
 
 (defn verify-transport-address
   [peer remote-peer address]

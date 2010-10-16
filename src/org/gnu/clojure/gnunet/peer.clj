@@ -16,8 +16,8 @@
   ;; (java.util.Date) :latency (int, if validated)}
   :transport-addresses-agent
   
-  ;; agent of a map of state used by core (nil for local peer?)
-  :core-state-agent)
+  ;; agent of a map of state (nil for local peer?)
+  :state-agent)
 
 (def peer-struct (apply create-struct (concat
   (keys (struct-map remote-peer-struct))
@@ -79,4 +79,4 @@
       :selector selector
       :selector-thread (Thread. (partial selector-loop! selector continuations))
       :selector-continuations-queue continuations
-      :random (SecureRandom.))))
+      :random (:random options))))
