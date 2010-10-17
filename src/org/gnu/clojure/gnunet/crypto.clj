@@ -6,16 +6,11 @@
     (java.security.spec RSAKeyGenParameterSpec RSAPublicKeySpec
                         RSAPrivateCrtKeySpec)
     (javax.crypto Cipher KeyGenerator SecretKeyFactory Mac)
-    javax.crypto.spec.SecretKeySpec))
+    (javax.crypto.spec SecretKeySpec IvParameterSpec)))
 
 (def signature-size 256)
 (def aes-key-size 32)
 (def aes-iv-size (/ aes-key-size 2))
-
-(defn generate-aes-key!
-  [random]
-  (.generateKey (doto (KeyGenerator/getInstance "AES")
-                  (.init (* 8 aes-key-size) random))))
 
 (defn sha-512
   "Compute the SHA-512 digest of a sequence of bytes."
@@ -49,20 +44,80 @@
                        counter]))
         keying-material (mapcat first (iterate generator [[] 0]))]
     (take output-length keying-material)))
-;; A.1.  Test Case 1
+;; RFC 5869 A.1. Test Case 1
 (is (= (let [ikm (encode-int 0x0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b)
              salt (concat [(byte 0)] (encode-int 0x0102030405060708090a0b0c))
              info (encode-int 0xf0f1f2f3f4f5f6f7f8f9)
              l 42]
          (hkdf hmac-sha-256 hmac-sha-256 ikm salt info l))
       (encode-int 0x3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865)))
-;; A.3.  Test Case 3
+;; RFC 5869 A.3. Test Case 3
 (is (= (let [ikm (encode-int 0x0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b)
              salt []
              info []
              l 42]
          (hkdf hmac-sha-256 hmac-sha-256 ikm salt info l))
       (encode-int 0x8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8))))
+
+(defn make-aes-key
+  [byte-seq]
+  (.generateSecret (SecretKeyFactory/getInstance "AES")
+    (SecretKeySpec. (byte-array byte-seq) "AES")))
+
+(defn generate-aes-key!
+  [random]
+  (.generateKey (doto (KeyGenerator/getInstance "AES")
+                  (.init (* 8 aes-key-size) random))))
+
+(defn derive-aes-iv
+  [aes-key salt context]
+  (IvParameterSpec.
+    (byte-array (hkdf hmac-sha-512 hmac-sha-256
+                  (.getEncoded aes-key) salt context aes-iv-size))))
+
+(with-test
+(defn aes-encrypt
+  [aes-key iv byte-seq]
+  (.doFinal (doto (Cipher/getInstance "AES/CFB/NoPadding")
+              (.init Cipher/ENCRYPT_MODE aes-key iv))
+    (byte-array byte-seq)))
+;; Test case from gnunet test_crypto_aes.c
+(is (= (let [plaintext (map #(.byteValue %)
+                         [29, 128, 192, 253, 74, 171, 38, 187, 84, 219, 76, 76, 209, 118, 33, 249,
+                          172, 124, 96, 9, 157, 110, 8, 215, 200, 63, 69, 230, 157, 104, 247, 164])
+             raw-key (map #(.byteValue %)
+                       [106, 74, 209, 88, 145, 55, 189, 135, 125, 180, 225, 108, 183, 54, 25,
+                        169, 129, 188, 131, 75, 227, 245, 105, 10, 225, 15, 115, 159, 148, 184,
+                        34, 191])
+             aes-key (make-aes-key raw-key)
+             iv (IvParameterSpec. (.getBytes "testtesttesttest" "UTF-8"))]
+         (seq (aes-encrypt aes-key iv plaintext)))
+      (map #(.byteValue %)
+        [167, 102, 230, 233, 127, 195, 176, 107, 17, 91, 199, 127, 96, 113, 75,
+         195, 245, 217, 61, 236, 159, 165, 103, 121, 203, 99, 202, 41, 23, 222, 25,
+         102]))))
+
+(with-test
+(defn aes-decrypt
+  [aes-key iv byte-seq]
+  (.doFinal (doto (Cipher/getInstance "AES/CFB/NoPadding")
+              (.init Cipher/DECRYPT_MODE aes-key iv))
+    (byte-array byte-seq)))
+;; Test case from gnunet test_crypto_aes.c
+(is (= (let [ciphertext (map #(.byteValue %)
+                          [167, 102, 230, 233, 127, 195, 176, 107, 17, 91, 199, 127, 96, 113, 75,
+                           195, 245, 217, 61, 236, 159, 165, 103, 121, 203, 99, 202, 41, 23, 222, 25,
+                           102])
+             raw-key (map #(.byteValue %)
+                       [106, 74, 209, 88, 145, 55, 189, 135, 125, 180, 225, 108, 183, 54, 25,
+                        169, 129, 188, 131, 75, 227, 245, 105, 10, 225, 15, 115, 159, 148, 184,
+                        34, 191])
+             aes-key (make-aes-key raw-key)
+             iv (IvParameterSpec. (.getBytes "testtesttesttest" "UTF-8"))]
+         (seq (aes-decrypt aes-key iv ciphertext)))
+      (map #(.byteValue %)
+        [29, 128, 192, 253, 74, 171, 38, 187, 84, 219, 76, 76, 209, 118, 33, 249,
+         172, 124, 96, 9, 157, 110, 8, 215, 200, 63, 69, 230, 157, 104, 247, 164]))))
 
 (defn encode-signed
   [purpose inner-material]

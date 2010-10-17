@@ -17,6 +17,16 @@
   :transport-addresses-agent
   
   ;; agent of a map of state (nil for local peer?)
+  ;; { (shared between layers)
+  ;;  :is-connected (boolean)
+  ;;  :connected-transport (value from peer-struct:transports-agent)
+  ;;  :connected-address (byte vector)
+  ;;   (core layer)
+  ;;  :status peer-status-down (int)
+  ;;  :decrypt-key-created (java.util.Date)
+  ;;  :encrypt-key (java.security.Key)
+  ;;  :encrypt-key-created (java.util.Date)
+  ;;  :ping-challenge (int) }
   :state-agent)
 
 (def peer-struct (apply create-struct (concat

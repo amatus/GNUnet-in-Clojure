@@ -65,12 +65,39 @@
      :peer-id peer-id
      :challenge challenge}))
 
+(defn derive-iv
+  [aes-key seed peer-id]
+  (derive-aes-iv aes-key
+    (encode-int32 seed)
+    (concat
+      peer-id
+      (encode-utf8 "initialization vector"))))
+
+(defn encrypt-message
+  [aes-key iv message]
+  (let [iv-seed (take 4 message)
+        plaintext (drop 4 message)]
+    (concat
+      iv-seed
+      (aes-encrypt aes-key iv plaintext))))
+
+(defn emit-messages!
+  [peer remote-peer messages]
+  (send (:state-agent remote-peer)
+    (fn [state]
+      (if (:is-connected state)
+        (let [transport (:connected-transport state)
+              encoded-address (:connected-address state)]
+          ((:emit-messages! transport) transport remote-peer
+            encoded-address nil messages)))
+      state)))
+
 (defn send-key!
   [peer remote-peer]
   (send (:state-agent remote-peer)
     (fn [state]
       (if-let [public-key (deref (:public-key-atom remote-peer))]
-        (if (state :is-connected false)
+        (if (:is-connected state)
           (let [state (if (= peer-status-down (:status state))
                         (assoc state :status peer-status-key-sent)
                         state)
@@ -88,7 +115,15 @@
                 ping {:iv-seed iv-seed
                       :challenge (:ping-challenge state)
                       :peer-id (:id remote-peer)}
-                encoded-ping (encode-core-ping ping)]
+                encoded-ping (encode-core-ping ping)
+                iv (derive-iv (:encrypt-key state) iv-seed (:id remote-peer))
+                encrypted-ping (encrypt-message (:encrypt-key state) iv
+                                 encoded-ping)]
+            (emit-messages! peer remote-peer
+              [{:message-type message-type-core-set-key
+                :bytes encoded-set-key}
+               {:message-type message-type-core-ping
+                :bytes encrypted-ping}])
             state)
           state)
         state))))

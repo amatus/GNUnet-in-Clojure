@@ -169,7 +169,7 @@
           :transport-addresses-agent (agent
                                        (merge-transport-addresses {}
                                          (:transport-addresses hello)))
-          :state-agent (agent {}))))))
+          :state-agent (agent {:is-connected false}))))))
 
 (defn verify-transport-address
   [peer remote-peer address]
@@ -179,7 +179,8 @@
     (if-let [transport ((deref (:transports-agent peer))
                          (:transport address))]
       (let [challenge (.nextInt (:random peer))]
-        ((:emit-messages! transport) transport (:encoded-address address)
+        ((:emit-messages! transport) transport remote-peer
+          (:encoded-address address) nil
           [(hello-for-peer-message peer)
            (ping-message remote-peer address challenge)])
         (conj address
@@ -238,7 +239,7 @@
                 address (val transport-addresses)]
           (if-let [transport ((deref (:transports-agent peer))
                                (key transport-addresses))]
-            ((:emit-messages! transport) transport (key address)
+            ((:emit-messages! transport) transport remote-peer (key address) nil
               [{:message-type message-type-pong :bytes encoded-pong}])))))))
 
 (defn send-pong-using!

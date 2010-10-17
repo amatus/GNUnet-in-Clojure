@@ -43,16 +43,31 @@
                                                   port))
                :expiration (hello-address-expiration)})))))))
 
+(defn emit-continuation!
+  [peer transport remote-peer encoded-address result]
+  (if result
+    (send (:state-agent remote-peer)
+      (fn [state]
+        (conj state {:is-connected true
+                     :connected-transport transport
+                     :connected-address encoded-address})))))
+
 (defn emit-messages-udp!
-  [peer transport encoded-address messages]
-  (let [address (first (parse-address encoded-address))]
-    (.add (:send-queue transport)
-      {:bytes (generate-udp-message peer messages)
-       :address address})
-    (.add (:selector-continuations-queue peer)
-      #(.interestOps (:selection-key transport)
-         (bit-or SelectionKey/OP_READ SelectionKey/OP_WRITE)))
-    (.wakeup (:selector peer))))
+  [peer transport remote-peer encoded-address continuation! messages]
+  (if-let [address (first (parse-address encoded-address))]
+    (let [continuation! #(do
+                           (emit-continuation! peer transport remote-peer
+                             encoded-address %)
+                           (continuation! %))] 
+      (.add (:send-queue transport)
+        {:bytes (generate-udp-message peer messages)
+         :address address
+         :continuation! continuation!})
+      (.add (:selector-continuations-queue peer)
+        #(.interestOps (:selection-key transport)
+           (bit-or SelectionKey/OP_READ SelectionKey/OP_WRITE)))
+      (.wakeup (:selector peer)))
+    (when continuation! (continuation! false))))
 
 (defn handle-channel-writable!
   [peer datagram-channel]
@@ -60,8 +75,11 @@
     (.add (:selector-continuations-queue peer)
       #(let [packet (.poll (:send-queue transport))]
          (if (not (nil? packet))
-           (let [byte-buffer (ByteBuffer/wrap (byte-array (:bytes packet)))]
-             (.send datagram-channel byte-buffer (:address packet)))
+           (try
+             (let [byte-buffer (ByteBuffer/wrap (byte-array (:bytes packet)))]
+               (.send datagram-channel byte-buffer (:address packet)))
+             ((:continuation! packet) true)
+             (catch Exception e ((:continuation! packet) false)))
            (.interestOps (:selection-key transport) SelectionKey/OP_READ))))))
 
 (defn handle-channel-readable!
@@ -86,7 +104,7 @@
   (if (.isWritable selection-key)
     (handle-channel-writable! peer datagram-channel)))
 
-(defn- register-datagram-channel!
+(defn register-datagram-channel!
   [peer port]
   (let [datagram-channel (DatagramChannel/open)
         socket (.socket datagram-channel)]
