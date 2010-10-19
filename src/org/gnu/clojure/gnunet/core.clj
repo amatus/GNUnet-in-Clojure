@@ -58,7 +58,7 @@
     (encode-int32 (:challenge ping))))
 
 (def parse-core-ping
-  (domonad parser-m [iv-seed parse-uint32
+  (domonad parser-m [iv-seed parse-int32
                      peer-id (items id-size)
                      challenge parse-int32]
     {:iv-seed iv-seed
@@ -72,6 +72,16 @@
     (encode-int32 (:challenge pong))
     (encode-int32 (:inbound-bw-limit pong))
     (:peer-id pong)))
+
+(def parse-core-pong
+  (domonad parser-m [iv-seed parse-int32
+                     challenge parse-int32
+                     inbound-bw-limit parse-uint32
+                     peer-id (items id-size)]
+    {:iv-seed iv-seed
+     :challenge challenge
+     :inbound-bw-limit inbound-bw-limit
+     :peer-id peer-id}))
 
 (defn derive-iv
   [aes-key seed peer-id]
@@ -238,7 +248,29 @@
                     [{:message-type message-type-core-pong
                       :bytes encrypted-pong}])))))))
       state)))
-                
+
+(defn handle-core-pong!
+  [peer remote-peer message]
+  (send (:state-agent remote-peer)
+    (fn [state]
+      (if-let [decrypt-key (:decrypt-key state)]
+        (if-let [pong (first (parse-core-pong (:bytes message)))]
+          (let [iv (derive-pong-iv decrypt-key (:iv-seed pong)
+                     (:ping-challenge state) (:id peer))
+                decrypted-message (decrypt-message decrypt-key iv
+                                    (:bytes message))]
+            (if-let [pong (first (parse-core-pong decrypted-message))]
+              (if (and (= (:peer-id pong) (:id remote-peer))
+                    (= (:challenge pong) (:ping-challenge state)))
+                (condp = (:status state)
+                  peer-status-key-received (assoc state :status
+                                             peer-status-key-confirmed)
+                  state)
+                state)
+              state))
+          state)
+        state))))
+
 (defn initialize-remote-peer-state
   [peer state]
   (conj state
@@ -261,6 +293,6 @@
           message-type-core-set-key (handle-set-key! peer remote-peer message)
           message-type-core-encrypted-message nil
           message-type-core-ping (handle-core-ping! peer remote-peer message)
-          message-type-core-pong nil
+          message-type-core-pong (handle-core-pong! peer remote-peer message)
           nil)
         state))))
