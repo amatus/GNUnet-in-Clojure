@@ -2,6 +2,7 @@
   (:use (org.gnu.clojure.gnunet parser message primes)
     clojure.contrib.monads clojure.test)
   (:import java.math.BigInteger
+    java.util.zip.CRC32
     (java.security KeyPairGenerator KeyFactory MessageDigest Signature)
     (java.security.spec RSAKeyGenParameterSpec RSAPublicKeySpec
                         RSAPrivateCrtKeySpec)
@@ -63,6 +64,22 @@
   [byte-seq]
   (.generateSecret (SecretKeyFactory/getInstance "AES")
     (SecretKeySpec. (byte-array byte-seq) "AES")))
+
+(defn crc32
+  [byte-seq]
+  (.getValue (doto (CRC32.) (.update (byte-array byte-seq)))))
+
+(defn encode-aes-key
+  [aes-key]
+  (concat
+    (.getEncoded aes-key)
+    (encode-int32 (crc32 (.getEncoded aes-key)))))
+
+(def parse-aes-key
+  (domonad parser-m [aes-key (items aes-key-size)
+                     checksum parse-uint32
+                     :when (= checksum (crc32 aes-key))]
+    (make-aes-key aes-key)))
 
 (defn generate-aes-key!
   [random]

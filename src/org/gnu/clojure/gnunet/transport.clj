@@ -289,6 +289,19 @@
         (send (:transport-addresses-agent remote-peer) check-pending-validation
           remote-peer pong)))))
 
+(defn emit-continuation!
+  [peer transport remote-peer encoded-address result]
+  (if result
+    (let [addresses ((deref (:transport-addresses-agent remote-peer))
+                      (:name transport))
+          address (addresses encoded-address)]
+      (if (contains? address :latency)
+        (send (:state-agent remote-peer)
+          (fn [state]
+            (conj state {:is-connected true
+                         :connected-transport transport
+                         :connected-address encoded-address})))))))
+
 (defn admit-message!
   [peer sender-id address message]
   (let [string-builder (StringBuilder. "Received message type ")]

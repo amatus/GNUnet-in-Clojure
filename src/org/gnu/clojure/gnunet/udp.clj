@@ -43,22 +43,13 @@
                                                   port))
                :expiration (hello-address-expiration)})))))))
 
-(defn emit-continuation!
-  [peer transport remote-peer encoded-address result]
-  (if result
-    (send (:state-agent remote-peer)
-      (fn [state]
-        (conj state {:is-connected true
-                     :connected-transport transport
-                     :connected-address encoded-address})))))
-
 (defn emit-messages-udp!
   [peer transport remote-peer encoded-address continuation! messages]
   (if-let [address (first (parse-address encoded-address))]
     (let [continuation! #(do
                            (emit-continuation! peer transport remote-peer
                              encoded-address %)
-                           (continuation! %))] 
+                           (when continuation! (continuation! %)))] 
       (.add (:send-queue transport)
         {:bytes (generate-udp-message peer messages)
          :address address
@@ -118,7 +109,8 @@
       (send (:transports-agent peer)
         (fn [transports]
           (assoc transports "udp"
-            {:emit-messages! (partial emit-messages-udp! peer)
+            {:name "udp"
+             :emit-messages! (partial emit-messages-udp! peer)
              :socket socket
              :selection-key selection-key
              :send-queue (ConcurrentLinkedQueue.)}))))))

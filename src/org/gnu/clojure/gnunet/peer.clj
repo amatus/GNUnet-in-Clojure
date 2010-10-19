@@ -26,7 +26,8 @@
   ;;  :decrypt-key-created (java.util.Date)
   ;;  :encrypt-key (java.security.Key)
   ;;  :encrypt-key-created (java.util.Date)
-  ;;  :ping-challenge (int) }
+  ;;  :ping-challenge (int)
+  ;;  :bw-in (int) }
   :state-agent)
 
 (def peer-struct (apply create-struct (concat
