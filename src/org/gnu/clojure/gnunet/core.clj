@@ -50,39 +50,6 @@
        :signature signature}
       (:parsed signed))))
 
-(defn encode-core-ping
-  [ping]
-  (concat
-    (encode-int32 (:iv-seed ping))
-    (:peer-id ping)
-    (encode-int32 (:challenge ping))))
-
-(def parse-core-ping
-  (domonad parser-m [iv-seed parse-int32
-                     peer-id (items id-size)
-                     challenge parse-int32]
-    {:iv-seed iv-seed
-     :peer-id peer-id
-     :challenge challenge}))
-
-(defn encode-core-pong
-  [pong]
-  (concat
-    (encode-int32 (:iv-seed pong))
-    (encode-int32 (:challenge pong))
-    (encode-int32 (:inbound-bw-limit pong))
-    (:peer-id pong)))
-
-(def parse-core-pong
-  (domonad parser-m [iv-seed parse-int32
-                     challenge parse-int32
-                     inbound-bw-limit parse-uint32
-                     peer-id (items id-size)]
-    {:iv-seed iv-seed
-     :challenge challenge
-     :inbound-bw-limit inbound-bw-limit
-     :peer-id peer-id}))
-
 (defn derive-iv
   [aes-key seed peer-id]
   (derive-aes-iv aes-key
@@ -100,21 +67,61 @@
       (encode-int32 challenge)
       (encode-utf8 "pong initialization vector"))))
 
-(defn encrypt-message
-  [aes-key iv message]
-  (let [iv-seed (take 4 message)
-        plaintext (drop 4 message)]
+(defn encode-core-ping
+  [ping aes-key remote-peer-id]
+  (let [iv (derive-iv aes-key (:iv-seed ping) remote-peer-id)]
     (concat
-      iv-seed
-      (aes-encrypt aes-key iv plaintext))))
+      (encode-int32 (:iv-seed ping))
+      (aes-encrypt aes-key iv
+        (concat
+          (:peer-id ping)
+          (encode-int32 (:challenge ping)))))))
 
-(defn decrypt-message
-  [aes-key iv message]
-  (let [iv-seed (take 4 message)
-        ciphertext (drop 4 message)]
+(defn parse-core-ping
+  [aes-key peer-id]
+  (domonad parser-m
+    [iv-seed parse-int32
+     :let [iv (derive-iv aes-key iv-seed peer-id)]
+     ciphertext (none-or-more item)
+     :let [plaintext (aes-decrypt aes-key iv ciphertext)]
+     :let [ping (first ((domonad parser-m
+                          [peer-id (items id-size)
+                           challenge parse-int32]
+                          {:peer-id peer-id
+                           :challenge challenge})
+                         plaintext))]
+     :when ping]
+    ping))
+
+(defn encode-core-pong
+  [pong aes-key remote-peer-id]
+  (let [iv (derive-pong-iv aes-key (:iv-seed pong) (:challenge pong)
+             remote-peer-id)]
     (concat
-      iv-seed
-      (aes-decrypt aes-key iv ciphertext))))
+      (encode-int32 (:iv-seed pong))
+      (aes-encrypt aes-key iv
+        (concat
+          (encode-int32 (:challenge pong))
+          (encode-int32 (:inbound-bw-limit pong))
+          (:peer-id pong))))))
+
+(defn parse-core-pong
+  [aes-key ping-challenge peer-id]
+  (domonad parser-m
+    [iv-seed parse-int32
+     :let [iv (derive-pong-iv aes-key iv-seed ping-challenge peer-id)]
+     ciphertext (none-or-more item)
+     :let [plaintext (aes-decrypt aes-key iv ciphertext)]
+     :let [pong (first ((domonad parser-m
+                          [challenge parse-int32
+                           :when (= challenge ping-challenge)
+                           inbound-bw-limit parse-uint32
+                           peer-id (items id-size)]
+                          {:inbound-bw-limit inbound-bw-limit
+                           :peer-id peer-id})
+                         plaintext))]
+     :when pong]
+    pong))
 
 (defn emit-messages!
   [peer remote-peer messages]
@@ -151,15 +158,14 @@
                 ping {:iv-seed iv-seed
                       :challenge (:ping-challenge state)
                       :peer-id (:id remote-peer)}
-                encoded-ping (encode-core-ping ping)
-                aes-key (:encrypt-key state)
-                iv (derive-iv aes-key iv-seed (:id remote-peer))
-                encrypted-ping (encrypt-message aes-key iv encoded-ping)]
+                encoded-ping (encode-core-ping ping
+                               (:encrypt-key state)
+                               (:id remote-peer))]
             (emit-messages! peer remote-peer
               [{:message-type message-type-core-set-key
                 :bytes encoded-set-key}
                {:message-type message-type-core-ping
-                :bytes encrypted-ping}])
+                :bytes encoded-ping}])
             state)
           state)
         state))))
@@ -228,25 +234,19 @@
   (send (:state-agent remote-peer)
     (fn [state]
       (when-let [decrypt-key (:decrypt-key state)]
-        (when-let [ping (first (parse-core-ping (:bytes message)))]
-          (let [iv (derive-iv decrypt-key (:iv-seed ping) (:id peer))
-                decrypted-message (decrypt-message decrypt-key iv
-                                    (:bytes message))]
-            (when-let [ping (first (parse-core-ping decrypted-message))]
-              (when (= (:peer-id ping) (:id peer))
-                (let [iv-seed (.nextInt (:random peer))
-                      pong {:iv-seed iv-seed
-                            :challenge (:challenge ping)
-                            :inbound-bw-limit (:bw-in state)
-                            :peer-id (:id peer)}
-                      encoded-pong (encode-core-pong pong)
-                      aes-key (:encrypt-key state)
-                      iv (derive-pong-iv aes-key iv-seed (:challenge pong)
-                           (:id remote-peer))
-                      encrypted-pong (encrypt-message aes-key iv encoded-pong)]
-                  (emit-messages! peer remote-peer
-                    [{:message-type message-type-core-pong
-                      :bytes encrypted-pong}])))))))
+        (when-let [ping (first ((parse-core-ping decrypt-key (:id peer))
+                                 (:bytes message)))]
+          (when (= (:peer-id ping) (:id peer))
+            (let [iv-seed (.nextInt (:random peer))
+                  pong {:iv-seed iv-seed
+                        :challenge (:challenge ping)
+                        :inbound-bw-limit (:bw-in state)
+                        :peer-id (:id peer)}
+                  encoded-pong (encode-core-pong pong
+                                 (:encrypt-key state) (:id remote-peer))]
+              (emit-messages! peer remote-peer
+                [{:message-type message-type-core-pong
+                  :bytes encoded-pong}])))))
       state)))
 
 (defn handle-core-pong!
@@ -254,20 +254,15 @@
   (send (:state-agent remote-peer)
     (fn [state]
       (if-let [decrypt-key (:decrypt-key state)]
-        (if-let [pong (first (parse-core-pong (:bytes message)))]
-          (let [iv (derive-pong-iv decrypt-key (:iv-seed pong)
-                     (:ping-challenge state) (:id peer))
-                decrypted-message (decrypt-message decrypt-key iv
-                                    (:bytes message))]
-            (if-let [pong (first (parse-core-pong decrypted-message))]
-              (if (and (= (:peer-id pong) (:id remote-peer))
-                    (= (:challenge pong) (:ping-challenge state)))
-                (condp = (:status state)
-                  peer-status-key-received (assoc state :status
-                                             peer-status-key-confirmed)
-                  state)
-                state)
-              state))
+        (if-let [pong (first ((parse-core-pong decrypt-key
+                                (:ping-challenge state) (:id peer))
+                               (:bytes message)))]
+          (if (= (:peer-id pong) (:id remote-peer))
+            (condp = (:status state)
+              peer-status-key-received (assoc state :status
+                                         peer-status-key-confirmed)
+              state)
+            state)
           state)
         state))))
 
