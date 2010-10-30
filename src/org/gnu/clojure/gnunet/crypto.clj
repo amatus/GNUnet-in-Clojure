@@ -148,20 +148,20 @@
    the contained signed material. The produced parser will fail if the given
    parser does not successfully consume the entire signed material."
   [signed-material-parser]
-  (fn
-    [input]
-    (when-let [[[size purpose inner-material] residue]
-               ((domonad parser-m [size parse-uint32
-                                   :when (<= 8 size)
-                                   purpose parse-uint32
-                                   inner-material (items (- size 8))]
-                  [size purpose inner-material]) input)]
-      (when-let [[parsed inner-residue]
-                 (signed-material-parser inner-material)]
-        (if (empty? inner-residue)
-          [{:purpose purpose
-            :signed-material (take size input)
-            :parsed parsed} residue])))))
+  (domonad parser-m
+    [encoded-size (items 4)
+     :let [size (long (decode-uint encoded-size))] 
+     :when (<= 8 size)
+     encoded-purpose (items 4)
+     :let [purpose (long (decode-uint encoded-purpose))]
+     inner-material (items (- size 8))
+     :let [result (signed-material-parser inner-material)]
+     :when result
+     :let [[parsed residue] result]
+     :when (empty? residue)]
+    {:purpose purpose
+     :signed-material (concat encoded-size encoded-purpose inner-material)
+     :parsed parsed}))
 
 (defn generate-rsa-keypair!
   "Generate a 2048 bit RSA keypair."

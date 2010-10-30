@@ -104,13 +104,15 @@
      :bytes message}))
 
 (defn parse-message-types
-  "Produces a parser for messages of the given types.
+  "Produces a parser for a message of the given types.
    The parser does not fail if the message-type specific parser does not consume
    the entire message."
   [parser-map]
-  (fn [s]
-    (when-let [xs (parse-message s)]
-      (let [[{message-type :message-type message :bytes} ss] xs]
-        (when (contains? parser-map message-type)
-          (when-let [xs ((get parser-map message-type) message)]
-            [{:message-type message-type :message (first xs)} ss]))))))
+  (domonad parser-m
+    [message parse-message
+     :let [parser (parser-map (:message-type message))]
+     :when parser
+     :let [parsed (first (parser (:bytes message)))]
+     :when parsed]
+    {:message-type (:message-type message)
+     :message parsed}))
