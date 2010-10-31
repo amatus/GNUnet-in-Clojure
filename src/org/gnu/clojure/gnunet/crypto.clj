@@ -9,6 +9,7 @@
     (javax.crypto Cipher KeyGenerator SecretKeyFactory Mac)
     (javax.crypto.spec SecretKeySpec IvParameterSpec)))
 
+(def hash-size 64)
 (def signature-size 256)
 (def aes-key-size 32)
 (def aes-iv-size (/ aes-key-size 2))
@@ -59,6 +60,11 @@
              l 42]
          (hkdf hmac-sha-256 hmac-sha-256 ikm salt info l))
       (encode-int 0x8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8))))
+
+(defn derive-hmac-key
+  [aes-key salt context]
+  (hkdf hmac-sha-512 hmac-sha-256
+    (.getEncoded aes-key) salt context hash-size))
 
 (defn make-aes-key
   [byte-seq]

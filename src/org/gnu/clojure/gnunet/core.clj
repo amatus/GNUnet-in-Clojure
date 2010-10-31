@@ -1,7 +1,7 @@
 (ns org.gnu.clojure.gnunet.core
   (:use (org.gnu.clojure.gnunet parser message peer crypto)
     clojure.contrib.monads)
-  (:import java.util.Date))
+  (:import (java.util Date Calendar)))
 
 (def message-type-core-set-key 80)
 (def message-type-core-encrypted-message 81)
@@ -14,6 +14,10 @@
 (def peer-status-key-sent 1)
 (def peer-status-key-received 2)
 (def peer-status-key-confirmed 3)
+
+(defn message-expiration
+  []
+  (.getTime (doto (Calendar/getInstance) (.add Calendar/DAY_OF_YEAR -1))))
 
 (defn encode-set-key-signed-material
   [set-key]
@@ -67,6 +71,15 @@
       (encode-int32 challenge)
       (encode-utf8 "pong initialization vector"))))
 
+(defn derive-auth-key
+  [aes-key seed aes-key-created]
+  (derive-hmac-key aes-key
+    (encode-int32 seed)
+    (concat
+      (.getEncoded aes-key)
+      (encode-date aes-key-created)
+      (encode-utf8 "authentication key"))))
+
 (defn encode-core-ping
   [ping aes-key remote-peer-id]
   (let [iv (derive-iv aes-key (:iv-seed ping) remote-peer-id)]
@@ -81,8 +94,8 @@
   [aes-key peer-id]
   (domonad parser-m
     [iv-seed parse-int32
-     :let [iv (derive-iv aes-key iv-seed peer-id)]
      ciphertext (none-or-more item)
+     :let [iv (derive-iv aes-key iv-seed peer-id)]
      :let [plaintext (aes-decrypt aes-key iv ciphertext)]
      :let [ping (first ((domonad parser-m
                           [peer-id (items id-size)
@@ -109,8 +122,8 @@
   [aes-key ping-challenge peer-id]
   (domonad parser-m
     [iv-seed parse-int32
-     :let [iv (derive-pong-iv aes-key iv-seed ping-challenge peer-id)]
      ciphertext (none-or-more item)
+     :let [iv (derive-pong-iv aes-key iv-seed ping-challenge peer-id)]
      :let [plaintext (aes-decrypt aes-key iv ciphertext)]
      :let [pong (first ((domonad parser-m
                           [challenge parse-int32
@@ -122,6 +135,29 @@
                          plaintext))]
      :when pong]
     pong))
+
+(defn parse-core-encrypted-message
+  [aes-key aes-key-created peer-id]
+  (domonad parser-m
+    [iv-seed parse-int32
+     hmac (items hash-size)
+     ciphertext (none-or-more item)
+     :let [auth-key (derive-auth-key aes-key iv-seed aes-key-created)]
+     :when (= hmac (seq (hmac-sha-512 auth-key ciphertext)))
+     :let [iv (derive-iv aes-key iv-seed peer-id)]
+     :let [plaintext (aes-decrypt aes-key iv ciphertext)]
+     :let [message (first ((domonad parser-m
+                             [sequence-number parse-uint32
+                              inbound-bw-limit parse-uint32
+                              timestamp parse-date
+                              message-bytes (none-or-more item)]
+                             {:sequence-number sequence-number
+                              :inbound-bw-limit inbound-bw-limit
+                              :timestamp timestamp
+                              :bytes message-bytes})
+                            plaintext))]
+     :when message]
+    message))
 
 (defn emit-messages!
   [peer remote-peer messages]
@@ -207,7 +243,7 @@
               state (if (= decrypt-key-created creation-time)
                       state
                       (conj state {:last-sequence-number-received 0
-                                   :last-packets-bitmap 0
+                                   :last-packets-bitmap (int 0)
                                    :decrypt-key-created creation-time}))
               status (:status state)
               sender-status (:sender-status set-key)]
@@ -266,6 +302,51 @@
           state)
         state))))
 
+(defn admit-core-message!
+  [peer remote-peer message]
+  (send (:state-agent remote-peer)
+    (fn [state]
+      ;; TODO: update bandwidth tracking
+      state
+      )))
+
+(defn handle-core-encrypted-message!
+  [peer remote-peer message]
+  (send (:state-agent remote-peer)
+    (fn [state]
+      (if-let [decrypt-key (:decrypt-key state)]
+        (if-let [message (first ((parse-core-encrypted-message decrypt-key
+                                   (:decrypt-key-created state) (:id peer))
+                                  (:bytes message)))]
+          (let [last-seqnum-received (:last-sequence-number-received state)
+                seqnum (:sequence-number message)]
+            (cond
+              (.before (:timestamp message) (message-expiration))
+              state
+              (== last-seqnum-received seqnum)
+              state
+              (> last-seqnum-received (+ 32 seqnum))
+              state
+              (> last-seqnum-received seqnum)
+              (let [bit (bit-set 0 (- last-seqnum-received seqnum 1))
+                    bitmap (:last-packets-bitmap state)]
+                (if (bit-test bitmap bit)
+                  state
+                  (do
+                    (admit-core-message! peer remote-peer message)
+                    (assoc state :last-packets-bitmap (bit-or bitmap bit)))))
+              (< last-seqnum-received seqnum)
+              (let [bitmap (.intValue
+                             (bit-shift-left
+                               (bigint (:last-packets-bitmap state))
+                               (- seqnum last-seqnum-received)))]
+                (admit-core-message! peer remote-peer message)
+                (conj state {:last-packets-bitmap bitmap
+                             :last-sequence-number-received seqnum}))
+              :else state))
+          state)
+        state))))
+
 (defn initialize-remote-peer-state
   [peer state]
   (conj state
@@ -286,7 +367,8 @@
                     (initialize-remote-peer-state peer state))]
         (condp = (:message-type message)
           message-type-core-set-key (handle-set-key! peer remote-peer message)
-          message-type-core-encrypted-message nil
+          message-type-core-encrypted-message (handle-core-encrypted-message!
+                                                peer remote-peer message)
           message-type-core-ping (handle-core-ping! peer remote-peer message)
           message-type-core-pong (handle-core-pong! peer remote-peer message)
           nil)

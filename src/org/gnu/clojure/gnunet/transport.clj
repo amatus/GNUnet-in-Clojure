@@ -125,7 +125,7 @@
 
 (defn expire-transport-addresses
   [min-expiration addresses-list]
-  (filter #(>= 0 (compare min-expiration (:expiration %))) addresses-list))
+  (filter #(not (.after min-expiration (:expiration %))) addresses-list))
 
 (defn hello-for-peer-message
   [peer]
@@ -283,7 +283,7 @@
 (defn handle-pong!
   [peer message]
   (when-let [pong (first (parse-pong (:bytes message)))]
-    (if (>= 0 (.compareTo (Date.) (:expiration pong)))
+    (if (not (.after (Date.) (:expiration pong)))
       (when-let [remote-peer ((deref (:remote-peers-agent peer))
                                (:peer-id pong))]
         (send (:transport-addresses-agent remote-peer) check-pending-validation

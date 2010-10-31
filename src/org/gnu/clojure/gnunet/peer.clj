@@ -64,7 +64,7 @@
   [public-key]
   (vec (sha-512 (encode-rsa-public-key public-key))))
 
-(def id-size (count (sha-512 ())))
+(def id-size hash-size)
 
 (defn selector-loop!
   [selector continuations]
