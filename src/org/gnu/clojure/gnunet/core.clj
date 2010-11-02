@@ -150,11 +150,11 @@
                              [sequence-number parse-uint32
                               inbound-bw-limit parse-uint32
                               timestamp parse-date
-                              message-bytes (none-or-more item)]
+                              messages (none-or-more parse-message)]
                              {:sequence-number sequence-number
                               :inbound-bw-limit inbound-bw-limit
                               :timestamp timestamp
-                              :bytes message-bytes})
+                              :messages messages})
                             plaintext))]
      :when message]
     message))
@@ -304,11 +304,14 @@
 
 (defn admit-core-message!
   [peer remote-peer message]
-  (send (:state-agent remote-peer)
-    (fn [state]
-      ;; TODO: update bandwidth tracking
-      state
-      )))
+  (if-let [dispatchers ((deref (:dispatch-agent peer))
+                         (:message-type message))]
+    (doseq [dispatcher! dispatchers]
+      (dispatcher! peer remote-peer message))
+    (do
+      (.write *out* "No dispatcher for message type ")
+      (.write *out* (.toString (:message-type message)))
+      (.write *out* "\n"))))
 
 (defn handle-core-encrypted-message!
   [peer remote-peer message]
@@ -333,14 +336,18 @@
                 (if (bit-test bitmap bit)
                   state
                   (do
-                    (admit-core-message! peer remote-peer message)
+                    ;; TODO: update bandwidth tracking
+                    (doseq [message (:messages message)]
+                      (admit-core-message! peer remote-peer message))
                     (assoc state :last-packets-bitmap (bit-or bitmap bit)))))
               (< last-seqnum-received seqnum)
               (let [bitmap (.intValue
                              (bit-shift-left
                                (bigint (:last-packets-bitmap state))
                                (- seqnum last-seqnum-received)))]
-                (admit-core-message! peer remote-peer message)
+                ;; TODO: update bandwidth tracking
+                (doseq [message (:messages message)]
+                  (admit-core-message! peer remote-peer message))
                 (conj state {:last-packets-bitmap bitmap
                              :last-sequence-number-received seqnum}))
               :else state))

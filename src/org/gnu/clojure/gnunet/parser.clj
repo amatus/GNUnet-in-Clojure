@@ -38,6 +38,13 @@
   (with-monad parser-m
     (m-plus mv (m-result nil))))
 
+(defn conditional
+  "Returns the parser on a condition, otherwise a parser that returns nil."
+  [condition mv]
+  (if condition
+    mv
+    (with-monad parser-m (m-result nil))))
+
 (defn none-or-more
   "Makes a parser repeat none or more times."
   [mv]

@@ -304,14 +304,6 @@
 
 (defn admit-message!
   [peer sender-id address message]
-  (let [string-builder (StringBuilder. "Received message type ")]
-      (.append string-builder (:message-type message))
-      (.append string-builder " from ")
-      (.append string-builder (vec (:encoded-address address)))
-      (.append string-builder " id ")
-      (.append string-builder sender-id)
-      (.append string-builder "\n")
-      (.write *out* (.toString string-builder)))
   (send (:remote-peers-agent peer)
     (fn [remote-peers]
       (let [remote-peers (update-remote-peers remote-peers

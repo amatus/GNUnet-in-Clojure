@@ -42,6 +42,9 @@
     ;; agent of a map of transport names (String) to maps of {:emit-message!}
     :transports-agent
     
+    ;; agent of a map of message types to sets of dispatch handlers
+    :dispatch-agent
+    
     ;; java.nio.channels.Selector
     :selector
     
@@ -86,7 +89,8 @@
       :transport-addresses-agent (agent {})
       :private-key (.getPrivate (:keypair options))
       :remote-peers-agent (agent {})
-      :transports-agent (agent nil)
+      :transports-agent (agent {})
+      :dispatch-agent (agent {})
       :selector selector
       :selector-thread (Thread. (partial selector-loop! selector continuations))
       :selector-continuations-queue continuations
