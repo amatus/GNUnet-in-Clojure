@@ -1,5 +1,6 @@
 (ns org.gnu.clojure.gnunet.transport
-  (:use (org.gnu.clojure.gnunet parser message hello peer util crypto core)
+  (:use (org.gnu.clojure.gnunet core crypto exception hello message parser peer
+          util)
     clojure.contrib.monads)
   (:import (java.util Date Calendar)))
 
@@ -32,10 +33,11 @@
         (:encoded-address ping)))))
 
 (def parse-ping
-  (domonad parser-m [challenge parse-uint32
-                     peer-id (items id-size)
-                     transport (optional parse-utf8)
-                     encoded-address (none-or-more item)]
+  (domonad parser-m
+    [challenge parse-uint32
+     peer-id (items id-size)
+     transport (optional parse-utf8)
+     encoded-address (none-or-more item)]
     {:challenge challenge
      :peer-id peer-id
      :transport transport
@@ -173,20 +175,22 @@
 
 (defn verify-transport-address
   [peer remote-peer address]
-  (if (or (contains? address :latency)
-        (contains? address :send-time))
-    address
-    (if-let [transport ((deref (:transports-agent peer))
-                         (:transport address))]
-      (let [challenge (.nextInt (:random peer))]
-        ((:emit-messages! transport) transport remote-peer
-          (:encoded-address address) nil
-          [(hello-for-peer-message peer)
-           (ping-message remote-peer address challenge)])
-        (conj address
-          {:send-time (Date.)    ;; TODO: Now is not the actual send time.
-           :challenge challenge}))
-      address)))
+  (second
+    ((domonad exception-m
+       [address (fetch-state)
+        :when (not (or (contains? address :latency)
+                     (contains? address :send-time)))
+        :when-let [transport ((deref (:transports-agent peer))
+                               (:transport address))]
+        :let [challenge (.nextInt (:random peer))]
+        _ (set-state
+            (conj address
+              {:send-time (Date.)    ;; TODO: Now is not the actual send time.
+               :challenge challenge}))]
+       ((:emit-messages! transport) transport remote-peer
+         (:encoded-address address) nil
+         [(hello-for-peer-message peer)
+          (ping-message remote-peer address challenge)])) address)))
 
 (defn verify-transport-addresses
   [addresses peer remote-peer]
@@ -217,11 +221,11 @@
 
 (defn send-pong-own!
   [peer remote-peer ping]
-  (if-let [transport-addresses ((deref (:transport-addresses-agent peer))
-                                 (:transport ping))]
+  (when-let [transport-addresses ((deref (:transport-addresses-agent peer))
+                                   (:transport ping))]
     ;; XXX: Here we're looking for an exact match, gnunet allows transport
     ;; plugins to do inexact matches.
-    (if (contains? transport-addresses (:encoded-address ping))
+    (when (contains? transport-addresses (:encoded-address ping))
       (let [pong {:challenge (:challenge ping)
                   :signature-purpose signature-purpose-pong-own
                   :expiration (pong-expiration)
@@ -237,8 +241,8 @@
         (doseq [transport-addresses (deref
                                       (:transport-addresses-agent remote-peer))
                 address (val transport-addresses)]
-          (if-let [transport ((deref (:transports-agent peer))
-                               (key transport-addresses))]
+          (when-let [transport ((deref (:transports-agent peer))
+                                 (key transport-addresses))]
             ((:emit-messages! transport) transport remote-peer (key address) nil
               [{:message-type message-type-pong :bytes encoded-pong}])))))))
 
@@ -255,39 +259,30 @@
       (:transport ping) (send-pong-own! peer remote-peer ping)
       :else (send-pong-using! peer remote-peer ping))))
 
-(defn check-pending-validation
-  [addresses remote-peer pong]
-  (if-let [public-key (deref (:public-key-atom remote-peer))]
-    (if-let [transport (addresses (:transport pong))]
-      (if-let [address (transport (:encoded-address pong))]
-        (cond
-          (not (= (:challenge address) (:challenge pong))) addresses
-          (= signature-purpose-pong-own (:signature-purpose pong))
-            (if (rsa-verify public-key
-                  (:signed-material pong)
-                  (:signature pong))
-              (assoc addresses (:transport pong)
-                (assoc transport (:encoded-address pong)
-                  {:expiration (hello-address-expiration)
-                   :latency (- (.getTime (Date.))
-                              (.getTime (:send-time address)))}))
-              addresses)
-          (= signature-purpose-pong-using (:signature-purpose pong))
-            ;; TODO - fill in this case
-            addresses
-          :else addresses)
-        addresses)
-      addresses)
-    addresses))
-
 (defn handle-pong!
   [peer message]
-  (when-let [pong (first (parse-pong (:bytes message)))]
-    (if (not (.after (Date.) (:expiration pong)))
-      (when-let [remote-peer ((deref (:remote-peers-agent peer))
-                               (:peer-id pong))]
-        (send (:transport-addresses-agent remote-peer) check-pending-validation
-          remote-peer pong)))))
+  (domonad maybe-m
+    [pong (first (parse-pong (:bytes message)))
+     :when (not (.after (Date.) (:expiration pong)))
+     remote-peer ((deref (:remote-peers-agent peer)) (:peer-id pong))
+     public-key (deref (:public-key-atom remote-peer))]
+    (send-do-exception-m! (:transport-addresses-agent remote-peer)
+      [address (with-state-field (:transport pong)
+                 (fetch-val (:encoded-address pong)))
+       :when (= (:challenge address) (:challenge pong))
+       _ (cond
+           (= signature-purpose-pong-own (:signature-purpose pong))
+           (if (rsa-verify public-key (:signed-material pong) (:signature pong))
+             (with-state-field (:transport pong)
+               (set-val (:encoded-address pong)
+                 {:expiration (hello-address-expiration)
+                  :latency (- (.getTime (Date.))
+                             (.getTime (:send-time address)))}))
+             break)
+           (= signature-purpose-pong-using (:signature-purpose pong))
+           ;; TODO - fill in this case
+           break
+           :else break)] nil)))
 
 (defn emit-continuation!
   [peer transport remote-peer encoded-address result]

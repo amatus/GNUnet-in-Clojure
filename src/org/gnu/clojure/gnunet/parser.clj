@@ -3,6 +3,8 @@
 
 (def parser-m (state-t maybe-m))
 
+(with-monad parser-m
+
 (defn parser-m-until
   "An optimized implementation of m-until for the parser monad that
    replaces recursion by a loop."
@@ -22,28 +24,20 @@
 (defn satisfy
   "Produces a parser that matches an item which satisfies the given predicate."
   [p]
-  (domonad parser-m [x item
-                     :when (p x)]
+  (domonad
+    [x item
+     :when (p x)]
     x))
 
 (defn match-one
   "Match the first in a list of parsers."
   [& mvs]
-  (with-monad parser-m
-    (apply m-plus mvs)))
+  (apply m-plus mvs))
 
 (defn optional
   "Makes a parser optional."
   [mv]
-  (with-monad parser-m
-    (m-plus mv (m-result nil))))
-
-(defn conditional
-  "Returns the parser on a condition, otherwise a parser that returns nil."
-  [condition mv]
-  (if condition
-    mv
-    (with-monad parser-m (m-result nil))))
+  (match-one mv (m-result nil)))
 
 (defn none-or-more
   "Makes a parser repeat none or more times."
@@ -61,8 +55,9 @@
 (defn one-or-more
   "Makes a parser repeat one or more times."
   [mv]
-  (domonad parser-m [x mv
-                     xs (none-or-more mv)]
+  (domonad
+    [x mv
+     xs (none-or-more mv)]
     (cons x xs)))
 
 (defn n-times
@@ -78,6 +73,8 @@
                     [0 []]) s)]
       [(second (first xs)) (second xs)])))
 
-(def
-  #^{:doc "Produces a parser that matches a number of items."}
-  items (partial n-times item))
+(defn items
+  "Produces a parser that matches a number of items."
+  [n]
+  (n-times item n))
+)

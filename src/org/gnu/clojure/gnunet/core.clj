@@ -1,5 +1,5 @@
 (ns org.gnu.clojure.gnunet.core
-  (:use (org.gnu.clojure.gnunet parser message peer crypto)
+  (:use (org.gnu.clojure.gnunet crypto exception message parser peer)
     clojure.contrib.monads)
   (:import (java.util Date Calendar)))
 
@@ -161,146 +161,110 @@
 
 (defn emit-messages!
   [peer remote-peer messages]
-  (send (:state-agent remote-peer)
-    (fn [state]
-      (if (:is-connected state)
-        (let [transport (:connected-transport state)
-              encoded-address (:connected-address state)]
-          ((:emit-messages! transport) transport remote-peer
-            encoded-address nil messages)))
-      state)))
+  (send-do-exception-m! (:state-agent remote-peer)
+    [is-connected (fetch-val :is-connected)
+     :when is-connected
+     transport (fetch-val :connected-transport)
+     encoded-address (fetch-val :connected-address)]
+    ((:emit-messages! transport) transport remote-peer encoded-address nil
+      messages)))
 
 (defn send-key!
   [peer remote-peer]
-  (send (:state-agent remote-peer)
-    (fn [state]
-      (if-let [public-key (deref (:public-key-atom remote-peer))]
-        (if (:is-connected state)
-          (let [state (if (= peer-status-down (:status state))
-                        (assoc state :status peer-status-key-sent)
-                        state)
-                set-key {:sender-status (:status state)
-                         :creation-time (:encrypt-key-created state)
-                         :peer-id (:id remote-peer)
-                         :encrypted-key (rsa-encrypt!
-                                          public-key
-                                          (encode-aes-key (:encrypt-key state))
-                                          (:random peer))}
-                signed-material (encode-set-key-signed-material set-key)
-                signature (rsa-sign (:private-key peer) signed-material)
-                set-key (assoc set-key :signature signature)
-                encoded-set-key (encode-set-key set-key signed-material)
-                iv-seed (.nextInt (:random peer))
-                ping {:iv-seed iv-seed
-                      :challenge (:ping-challenge state)
-                      :peer-id (:id remote-peer)}
-                encoded-ping (encode-core-ping ping
-                               (:encrypt-key state)
-                               (:id remote-peer))]
-            (emit-messages! peer remote-peer
-              [{:message-type message-type-core-set-key
-                :bytes encoded-set-key}
-               {:message-type message-type-core-ping
-                :bytes encoded-ping}])
-            state)
-          state)
-        state))))
-
-(defn verify-set-key
-  [peer remote-peer state message]
-  (when-let [public-key (deref (:public-key-atom remote-peer))]
-    (when-let [set-key (first (parse-set-key (:bytes message)))]
-      (let [status (:status state)
-            decrypt-key-created (:decrypt-key-created state)]
-        (cond
-          (not (= (:peer-id set-key) (seq (:id peer)))) nil
-          (not (rsa-verify public-key
-                 (:signed-material set-key) (:signature set-key))) nil
-          (and
-            (or (= status peer-status-key-received)
-              (= status peer-status-key-confirmed))
-            (< 0 (.compareTo decrypt-key-created (:creation-time set-key)))) nil
-          :else (when-let [decrypted-key (rsa-decrypt (:private-key peer)
-                                           (:encrypted-key set-key))]
-                  ;; XXX: For some reason we end up with an extra 0 byte at the
-                  ;; beginning of the decrypted-key when the MSB is 1.
-                  (let [decrypted-key (drop (- (count decrypted-key)
-                                              aes-key-size 4)
-                                        decrypted-key)]
-                    (when-let [decrypt-key (first
-                                             (parse-aes-key decrypted-key))]
-                      (assoc set-key :decrypt-key decrypt-key)))))))))
+  (send-do-exception-m! (:state-agent remote-peer)
+    [:when-let [public-key (deref (:public-key-atom remote-peer))]
+     is-connected (fetch-val :is-connected)
+     :when is-connected
+     _ (update-val :status #(if (= % peer-status-down) peer-status-key-sent %))
+     sender-status (fetch-val :status)
+     creation-time (fetch-val :encrypt-key-created)
+     encrypt-key (fetch-val :encrypt-key)
+     challenge (fetch-val :ping-challenge)]
+    (let [set-key {:sender-status sender-status
+                   :creation-time creation-time
+                   :peer-id (:id remote-peer)
+                   :encrypted-key (rsa-encrypt! public-key
+                                    (encode-aes-key encrypt-key)
+                                    (:random peer))}
+          signed-material (encode-set-key-signed-material set-key)
+          signature (rsa-sign (:private-key peer) signed-material)
+          set-key (assoc set-key :signature signature)
+          encoded-set-key (encode-set-key set-key signed-material)
+          iv-seed (.nextInt (:random peer))
+          ping {:iv-seed iv-seed
+                :challenge challenge
+                :peer-id (:id remote-peer)}
+          encoded-ping (encode-core-ping ping encrypt-key (:id remote-peer))]
+      (emit-messages! peer remote-peer
+        [{:message-type message-type-core-set-key :bytes encoded-set-key}
+         {:message-type message-type-core-ping :bytes encoded-ping}]))))
 
 (defn handle-set-key!
   [peer remote-peer message]
-  (send (:state-agent remote-peer)
-    (fn [state]
-      (if-let [set-key (verify-set-key peer remote-peer state message)]
-        (let [decrypt-key (:decrypt-key set-key)
-              state (assoc state :decrypt-key decrypt-key)
-              decrypt-key-created (:decrypt-key-created state)
-              creation-time (:creation-time set-key)
-              state (if (= decrypt-key-created creation-time)
-                      state
-                      (conj state {:last-sequence-number-received 0
-                                   :last-packets-bitmap (int 0)
-                                   :decrypt-key-created creation-time}))
-              status (:status state)
-              sender-status (:sender-status set-key)]
-          (condp contains? status
-            #{peer-status-down}
-            (do (send-key! peer remote-peer)
-              (assoc state :status peer-status-key-received))
-            #{peer-status-key-sent
-              peer-status-key-received}
-            (do (if (and (not (= sender-status peer-status-key-received))
-                      (not (= sender-status peer-status-key-confirmed)))
-                  (send-key! peer remote-peer))
-              (assoc state :status peer-status-key-received))
-            #{peer-status-key-confirmed}
-            (do (if (and (not (= sender-status peer-status-key-received))
-                      (not (= sender-status peer-status-key-confirmed)))
-                  (send-key! peer remote-peer))
-              state)
-            state))
-        state))))
+  (send-do-exception-m! (:state-agent remote-peer)
+    [:when-let [public-key (deref (:public-key-atom remote-peer))]
+     :when-let [set-key (first (parse-set-key (:bytes message)))]
+     :when (= (:peer-id set-key) (:id peer))
+     :when (rsa-verify public-key
+             (:signed-material set-key) (:signature set-key))
+     status (fetch-val :status)
+     decrypt-key-created (fetch-val :decrypt-key-created)
+     :when-not (and
+                 (or (= status peer-status-key-received)
+                   (= status peer-status-key-confirmed))
+                 (.after decrypt-key-created (:creation-time set-key)))
+     :when-let [decrypted-key (rsa-decrypt (:private-key peer)
+                                (:encrypted-key set-key))]
+     ;; XXX: For some reason we end up with an extra 0 byte at the
+     ;; beginning of the decrypted-key when the MSB is 1.
+     :let [decrypted-key (drop (- (count decrypted-key) aes-key-size 4)
+                           decrypted-key)]
+     :when-let [decrypt-key (first (parse-aes-key decrypted-key))]
+     _ (set-val :decrypt-key decrypt-key)
+     :let [creation-time (:creation-time set-key)]
+     _ (update-state #(if (= decrypt-key-created creation-time)
+                        %
+                        (conj % {:last-sequence-number-received 0
+                                 :last-packets-bitmap (int 0)
+                                 :decrypt-key-created creation-time})))
+     :let [sender-status (:sender-status set-key)]
+     _ (update-val :status
+         #(if (= % peer-status-key-confirmed) % peer-status-key-received))]
+    (when (or (= status peer-status-down)
+            (and (not (= sender-status peer-status-key-received))
+              (not (= sender-status peer-status-key-confirmed))))
+      (send-key! peer remote-peer))))
 
 (defn handle-core-ping!
   [peer remote-peer message]
-  (send (:state-agent remote-peer)
-    (fn [state]
-      (when-let [decrypt-key (:decrypt-key state)]
-        (when-let [ping (first ((parse-core-ping decrypt-key (:id peer))
-                                 (:bytes message)))]
-          (when (= (:peer-id ping) (:id peer))
-            (let [iv-seed (.nextInt (:random peer))
-                  pong {:iv-seed iv-seed
-                        :challenge (:challenge ping)
-                        :inbound-bw-limit (:bw-in state)
-                        :peer-id (:id peer)}
-                  encoded-pong (encode-core-pong pong
-                                 (:encrypt-key state) (:id remote-peer))]
-              (emit-messages! peer remote-peer
-                [{:message-type message-type-core-pong
-                  :bytes encoded-pong}])))))
-      state)))
+  (send-do-exception-m! (:state-agent remote-peer)
+    [decrypt-key (fetch-val :decrypt-key)
+     :when decrypt-key
+     :when-let [ping (first ((parse-core-ping decrypt-key (:id peer))
+                              (:bytes message)))]
+     bw-in (fetch-val :bw-in)
+     encrypt-key (fetch-val :encrypt-key)]
+     (let [iv-seed (.nextInt (:random peer))
+           pong {:iv-seed iv-seed
+                 :challenge (:challenge ping)
+                 :inbound-bw-limit bw-in
+                 :peer-id (:id peer)}
+           encoded-pong (encode-core-pong pong encrypt-key (:id remote-peer))]
+       (emit-messages! peer remote-peer
+         [{:message-type message-type-core-pong :bytes encoded-pong}]))))
 
 (defn handle-core-pong!
   [peer remote-peer message]
-  (send (:state-agent remote-peer)
-    (fn [state]
-      (if-let [decrypt-key (:decrypt-key state)]
-        (if-let [pong (first ((parse-core-pong decrypt-key
-                                (:ping-challenge state) (:id peer))
-                               (:bytes message)))]
-          (if (= (:peer-id pong) (:id remote-peer))
-            (condp = (:status state)
-              peer-status-key-received (assoc state :status
-                                         peer-status-key-confirmed)
-              state)
-            state)
-          state)
-        state))))
+  (send-do-exception-m! (:state-agent remote-peer)
+    [decrypt-key (fetch-val :decrypt-key)
+     :when decrypt-key
+     challenge (fetch-val :ping-challenge)
+     :when-let [pong (first ((parse-core-pong decrypt-key
+                               challenge (:id peer)) (:bytes message)))]
+     :when (= (:peer-id pong) (:id remote-peer))
+     status (fetch-val :status)
+     :when (= status peer-status-key-received)
+     _ (set-val :status peer-status-key-confirmed)] nil))
 
 (defn admit-core-message!
   [peer remote-peer message]
@@ -308,75 +272,57 @@
                          (:message-type message))]
     (doseq [dispatcher! dispatchers]
       (dispatcher! peer remote-peer message))
-    (do
-      (.write *out* "No dispatcher for message type ")
-      (.write *out* (.toString (:message-type message)))
-      (.write *out* "\n"))))
+    (.write *out* (str "No dispatcher for message type "
+                    (:message-type message) "\n"))))
 
 (defn handle-core-encrypted-message!
   [peer remote-peer message]
-  (send (:state-agent remote-peer)
-    (fn [state]
-      (if-let [decrypt-key (:decrypt-key state)]
-        (if-let [message (first ((parse-core-encrypted-message decrypt-key
-                                   (:decrypt-key-created state) (:id peer))
-                                  (:bytes message)))]
-          (let [last-seqnum-received (:last-sequence-number-received state)
-                seqnum (:sequence-number message)]
-            (cond
-              (.before (:timestamp message) (message-expiration))
-              state
-              (== last-seqnum-received seqnum)
-              state
-              (> last-seqnum-received (+ 32 seqnum))
-              state
-              (> last-seqnum-received seqnum)
-              (let [bit (bit-set 0 (- last-seqnum-received seqnum 1))
-                    bitmap (:last-packets-bitmap state)]
-                (if (bit-test bitmap bit)
-                  state
-                  (do
-                    ;; TODO: update bandwidth tracking
-                    (doseq [message (:messages message)]
-                      (admit-core-message! peer remote-peer message))
-                    (assoc state :last-packets-bitmap (bit-or bitmap bit)))))
-              (< last-seqnum-received seqnum)
-              (let [bitmap (.intValue
-                             (bit-shift-left
-                               (bigint (:last-packets-bitmap state))
-                               (- seqnum last-seqnum-received)))]
-                ;; TODO: update bandwidth tracking
-                (doseq [message (:messages message)]
-                  (admit-core-message! peer remote-peer message))
-                (conj state {:last-packets-bitmap bitmap
-                             :last-sequence-number-received seqnum}))
-              :else state))
-          state)
-        state))))
-
-(defn initialize-remote-peer-state
-  [peer state]
-  (conj state
-    {:status peer-status-down
-     :decrypt-key-created (Date. (long 0))
-     :encrypt-key (generate-aes-key! (:random peer))
-     :encrypt-key-created (Date.)
-     :ping-challenge (.nextInt (:random peer))
-     ;; TODO: Make this a real number
-     :bw-in 20000}))
+  (send-do-exception-m! (:state-agent remote-peer)
+    [decrypt-key (fetch-val :decrypt-key)
+     :when decrypt-key
+     decrypt-key-created (fetch-val :decrypt-key-created)
+     :when-let [message (first
+                          ((parse-core-encrypted-message decrypt-key
+                             decrypt-key-created (:id peer)) (:bytes message)))]
+     last-seqnum (fetch-val :last-sequence-number-received)
+     :let [seqnum (:sequence-number message)]
+     :when-not (== last-seqnum seqnum)
+     :when-not (> last-seqnum (+ 32 seqnum))
+     bitmap (fetch-val :last-packets-bitmap)
+     :let [bit (- last-seqnum seqnum 1)]
+     :when-not (and (> last-seqnum seqnum) (bit-test bitmap bit))
+     _ (update-state
+         #(if (> last-seqnum seqnum)
+            (assoc % :last-packets-bitmap (bit-set bitmap bit))
+            (conj %
+              {:last-sequence-number-received seqnum
+               :last-packets-bitmap (.intValue
+                                      (bit-shift-left (bigint bitmap)
+                                        (- seqnum last-seqnum)))})))
+     :when-not (.before (:timestamp message) (message-expiration))
+     ;; TODO: update bandwidth tracking
+     ]
+    (doseq [message (:messages message)]
+      (admit-core-message! peer remote-peer message))))
 
 (defn handle-receive!
   [peer remote-peer message]
-  (send (:state-agent remote-peer)
-    (fn [state]
-      (let [state (if (contains? state :status)
-                    state
-                    (initialize-remote-peer-state peer state))]
-        (condp = (:message-type message)
-          message-type-core-set-key (handle-set-key! peer remote-peer message)
-          message-type-core-encrypted-message (handle-core-encrypted-message!
-                                                peer remote-peer message)
-          message-type-core-ping (handle-core-ping! peer remote-peer message)
-          message-type-core-pong (handle-core-pong! peer remote-peer message)
-          nil)
-        state))))
+  (send-do-exception-m! (:state-agent remote-peer)
+    [_ (update-state
+         #(if (contains? % :status)
+            %
+            (conj %
+              {:status peer-status-down
+               :decrypt-key-created (Date. (long 0))
+               :encrypt-key (generate-aes-key! (:random peer))
+               :encrypt-key-created (Date.)
+               :ping-challenge (.nextInt (:random peer))
+               ;; TODO: Make this a real number
+               :bw-in 20000})))]
+    (condp = (:message-type message)
+      message-type-core-set-key (handle-set-key! peer remote-peer message)
+      message-type-core-encrypted-message (handle-core-encrypted-message!
+                                            peer remote-peer message)
+      message-type-core-ping (handle-core-ping! peer remote-peer message)
+      message-type-core-pong (handle-core-pong! peer remote-peer message)
+      nil)))

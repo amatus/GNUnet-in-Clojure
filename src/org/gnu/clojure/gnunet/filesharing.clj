@@ -18,11 +18,11 @@
      filter-mutator parse-int32
      hash-bitmap parse-int32
      query (items hash-size)
-     return-to (conditional (bit-test hash-bitmap bit-return-to)
+     return-to (m-when (bit-test hash-bitmap bit-return-to)
                  (items id-size))
-     sks-namespace (conditional (bit-test hash-bitmap bit-sks-namespace)
+     sks-namespace (m-when (bit-test hash-bitmap bit-sks-namespace)
                      (items hash-size))
-     transmit-to (conditional (bit-test hash-bitmap bit-transmit-to)
+     transmit-to (m-when (bit-test hash-bitmap bit-transmit-to)
                    (items id-size))
      bloomfilter (optional (parse-bloomfilter bloomfilter-k))]
     {:block-type block-type
@@ -35,23 +35,15 @@
      :transmit-to transmit-to
      :bloomfilter bloomfilter}))
 
-(defn bound-priority
-  [priority remote-peer]
-  )
-
 (defn admit-get!
   [peer remote-peer message]
   (when-let [get-message (first (parse-get-message (:bytes message)))]
-    (.write *out* (.toString get-message))
-    (.write *out* "\n")
-    )
-  (when-let [return-to (if (:return-to message)
-                         ((deref (:remote-peers-agent peer))
-                           (:return-to message))
-                         remote-peer)]
-    (when-let [priority (bound-priority (:priority message) remote-peer)]
+    (.write *out* (str get-message "\n"))
+    (when-let [return-to (if (:return-to get-message)
+                           ((deref (:remote-peers-agent peer))
+                             (:return-to get-message))
+                           remote-peer)]
       )))
-        
 
 (defn admit-put!
   [peer remote-peer message])
