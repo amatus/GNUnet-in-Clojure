@@ -27,7 +27,10 @@
   ;;  :encrypt-key (java.security.Key)
   ;;  :encrypt-key-created (java.util.Date)
   ;;  :ping-challenge (int)
-  ;;  :bw-in (int) }
+  ;;  :bw-in (int)
+  ;;   (filesharing layer)
+  ;;  :trust (int)
+  ;;  :average-priority (float)}
   :state-agent)
 
 (def peer-struct (apply create-struct (concat

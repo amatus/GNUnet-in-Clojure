@@ -1,5 +1,6 @@
 (ns org.gnu.clojure.gnunet.filesharing
-  (:use (org.gnu.clojure.gnunet bloomfilter crypto message parser peer)
+  (:use (org.gnu.clojure.gnunet bloomfilter crypto exception message parser
+          peer)
     clojure.contrib.monads))
 
 (def message-type-fs-get 137)
@@ -9,6 +10,9 @@
 (def bit-return-to 1)
 (def bit-sks-namespace 2)
 (def bit-transmit-to 3)
+
+(def ttl-decrement 5000)
+(def ttl-max 1073741824)
 
 (def parse-get-message
   (domonad parser-m
@@ -35,15 +39,40 @@
      :transmit-to transmit-to
      :bloomfilter bloomfilter}))
 
+(defn bound-priority
+  "Monadic function of the exception-m monad. Updates :trust and
+   :average-priority and returns a bounded priority."
+  [priority]
+  (fn [state]
+    (let [priority (min priority (:turst state 0))
+          trust (- (:trust state) priority)
+          state (assoc state :trust trust)]
+      (if (< 0 priority)
+        (let [n 128
+              average (:average-priority state 0.0)
+              p (min priority (+ average n))
+              average (/ (+ p (* average (dec n))) n)]
+          [priority (assoc state :average-priority average)])
+        [priority state]))))
+
 (defn admit-get!
   [peer remote-peer message]
-  (when-let [get-message (first (parse-get-message (:bytes message)))]
-    (.write *out* (str get-message "\n"))
-    (when-let [return-to (if (:return-to get-message)
-                           ((deref (:remote-peers-agent peer))
-                             (:return-to get-message))
-                           remote-peer)]
-      )))
+  (send-do-exception-m! (:state-agent remote-peer)
+    [:when-let [get-message (first (parse-get-message (:bytes message)))]
+     :let [_ (.write *out* (str get-message "\n"))]
+     :when-let [return-to (if (:return-to get-message)
+                            ((deref (:remote-peers-agent peer))
+                              (:return-to get-message))
+                            remote-peer)]
+     :when (:is-connected (deref (:state-agent return-to))) ;; TODO: try connect
+     ;; TODO: check load and drop message if load is too high
+     priority (bound-priority (:priority get-message))
+     :let [ttl (min ttl-max (:ttl get-message)
+                 (* priority ttl-decrement 0.001))]
+     :let [ttl (- ttl (* 2 ttl-decrement)
+                 (.nextInt (:random peer) ttl-decrement))]
+     :when (< 0 ttl)]
+      nil))
 
 (defn admit-put!
   [peer remote-peer message])
