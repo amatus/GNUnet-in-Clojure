@@ -45,6 +45,8 @@
 
 (defn emit-messages-udp!
   [peer transport remote-peer encoded-address continuation! messages]
+  ;;(doseq [message messages]
+  ;;  (.write *out* (str "Send " message "\n")))
   (if-let [address (first (parse-address encoded-address))]
     (let [continuation! #(do
                            (emit-continuation! peer transport remote-peer
