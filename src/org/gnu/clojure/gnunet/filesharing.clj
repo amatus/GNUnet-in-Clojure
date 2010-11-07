@@ -42,6 +42,7 @@
 (defn bound-priority
   "Monadic function of the exception-m monad. Updates :trust and
    :average-priority and returns a bounded priority."
+  ;; TODO: check load, don't charge if we're idle, drop if we're too busy
   [priority]
   (fn [state]
     (let [priority (min priority (:turst state 0))
@@ -65,13 +66,14 @@
                               (:return-to get-message))
                             remote-peer)]
      :when (:is-connected (deref (:state-agent return-to))) ;; TODO: try connect
-     ;; TODO: check load and drop message if load is too high
      priority (bound-priority (:priority get-message))
      :let [ttl (min ttl-max (:ttl get-message)
                  (* priority ttl-decrement 0.001))]
      :let [ttl (- ttl (* 2 ttl-decrement)
                  (.nextInt (:random peer) ttl-decrement))]
-     :when (< 0 ttl)]
+     duplicate (with-state-field :queries
+                 (fetch-val (:query get-message)))
+     ]
       nil))
 
 (defn admit-put!

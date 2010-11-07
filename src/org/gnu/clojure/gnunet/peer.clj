@@ -1,7 +1,8 @@
 (ns org.gnu.clojure.gnunet.peer
   (:use (org.gnu.clojure.gnunet crypto message util))
   (:import java.nio.channels.Selector
-    java.util.concurrent.ConcurrentLinkedQueue
+    (java.util.concurrent ConcurrentLinkedQueue LinkedBlockingQueue
+      PriorityBlockingQueue ThreadPoolExecutor TimeUnit)
     java.security.SecureRandom))
 
 (defstruct remote-peer-struct
@@ -22,7 +23,7 @@
   ;;  :connected-transport (value from peer-struct:transports-agent)
   ;;  :connected-address (byte vector)
   ;;   (core layer)
-  ;;  :status peer-status-down (int)
+  ;;  :status (int)
   ;;  :decrypt-key-created (java.util.Date)
   ;;  :encrypt-key (java.security.Key)
   ;;  :encrypt-key-created (java.util.Date)
@@ -30,7 +31,8 @@
   ;;  :bw-in (int)
   ;;   (filesharing layer)
   ;;  :trust (int)
-  ;;  :average-priority (float)}
+  ;;  :average-priority (float)
+  ;;  :queries (map of query hashes to get-messages)}
   :state-agent)
 
 (def peer-struct (apply create-struct (concat
@@ -54,13 +56,34 @@
     ;; Thread which selects on :selector
     :selector-thread
     
-    ;; java.util.concurrent.ConcurrentLinkedQueue of continuations, in order to
-    ;; access the selector while the selector-thread is running add a
-    ;; continuation to this queue and call .wakeup on the selector
+    ;; java.util.concurrent.ConcurrentLinkedQueue of continuations.
+    ;; In order to access the selector while the selector-thread is running add
+    ;; a continuation to this queue and call .wakeup on the selector.
+    ;; The size of this queue is an easy measure our network load.
     :selector-continuations-queue
     
     ;; java.security.SecureRandom
-    :random))))
+    :random
+    
+    ;; java.util.concurrent.ThreadPoolExecutor for executing CPU-bound
+    ;; operations like generating RSA keys, hashes, etc. It has one thread for
+    ;; each processor in the system and a "practically" unbounded FIFO queue.
+    :cpu-bound-executor
+    
+    ;; java.util.concurrent.LinkedBlockingQueue of Integer.MAX_VALUE capacity.
+    ;; The size of this queue is an easy measure of our CPU load.
+    :cpu-bound-queue
+    
+    ;; java.util.concurrent.ThreadPoolExecutor for executing disk-bound
+    ;; operations like quering a database or reading/writing files. It has a
+    ;; single thread and an unbounded priority queue. The priority of a callable
+    ;; object is stored in its metadata under the key :priority.
+    :disk-bound-executor
+    
+    ;; java.util.concurrent.PriorityBlockingQueue of unbounded capacity.
+    ;; The size of this queue is an easy measure of our disk load.
+    :disk-bound-queue
+    ))))
 
 (defstruct peer-options
   :keypair)
@@ -71,6 +94,13 @@
   (vec (sha-512 (encode-rsa-public-key public-key))))
 
 (def id-size hash-size)
+
+(def priority-comparator
+  (reify java.util.Comparator
+    (compare [this o1 o2]
+      (clojure.core/compare (:priority (meta o2)) (:priority (meta o1))))
+    (equals [this obj]
+      (== (:priority (meta this)) (:priority (meta obj))))))
 
 (defn selector-loop!
   [selector continuations]
@@ -85,7 +115,13 @@
 
 (defn new-peer [options]
   (let [selector (Selector/open)
-        continuations (ConcurrentLinkedQueue.)]
+        continuations (ConcurrentLinkedQueue.)
+        cpu-bound-queue (LinkedBlockingQueue.)
+        cpu-bound-executor (ThreadPoolExecutor. 0 (available-processors) 60
+                             TimeUnit/SECONDS cpu-bound-queue)
+        disk-bound-queue (PriorityBlockingQueue. 1 priority-comparator)
+        disk-bound-executor (ThreadPoolExecutor. 0 1 60 TimeUnit/SECONDS
+                              disk-bound-queue)]
     (struct-map peer-struct
       :public-key-atom (atom (.getPublic (:keypair options)))
       :id (generate-id (.getPublic (:keypair options)))
@@ -97,4 +133,20 @@
       :selector selector
       :selector-thread (Thread. (partial selector-loop! selector continuations))
       :selector-continuations-queue continuations
-      :random (:random options))))
+      :random (:random options)
+      :cpu-bound-executor cpu-bound-executor
+      :cpu-bound-queue cpu-bound-queue
+      :disk-bound-executor disk-bound-executor
+      :disk-bound-queue disk-bound-queue)))
+
+(defn network-load
+  [peer]
+  (.size (:selector-continuations-queue peer)))
+
+(defn cpu-load
+  [peer]
+  (.size (:cpu-bound-queue peer)))
+
+(defn disk-load
+  [peer]
+  (.size (:disk-bound-queue peer)))

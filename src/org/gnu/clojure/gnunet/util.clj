@@ -14,3 +14,7 @@
   "Return the maximum in a collection of comparable values."
   [& coll]
   (last (sort coll)))
+
+(defn available-processors
+  []
+  (.availableProcessors (Runtime/getRuntime)))
