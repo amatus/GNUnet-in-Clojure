@@ -1,6 +1,6 @@
 (ns org.gnu.clojure.gnunet.transport
-  (:use (org.gnu.clojure.gnunet core crypto exception hello message parser peer
-          util)
+  (:use (org.gnu.clojure.gnunet core crypto exception hello message metrics
+          parser peer util)
     clojure.contrib.monads)
   (:import (java.util Date Calendar)))
 
@@ -279,7 +279,7 @@
                  {:expiration (hello-address-expiration)
                   :latency (- (.getTime (Date.))
                              (.getTime (:send-time address)))}))]
-          nil)))))
+          (metric-add peer "Peer addresses considered valid" 1))))))
 
 (defn handle-pong-using!
   [peer remote-peer pong]

@@ -1,7 +1,8 @@
 (ns org.gnu.clojure.gnunet.filesharing
-  (:use (org.gnu.clojure.gnunet bloomfilter crypto exception message parser
-          peer)
-    clojure.contrib.monads))
+  (:use (org.gnu.clojure.gnunet bloomfilter crypto exception message metrics
+          parser peer)
+    clojure.contrib.monads)
+  (:import java.util.Date))
 
 (def message-type-fs-get 137)
 (def message-type-fs-put 138)
@@ -42,19 +43,34 @@
 (defn bound-priority
   "Monadic function of the exception-m monad. Updates :trust and
    :average-priority and returns a bounded priority."
-  ;; TODO: check load, don't charge if we're idle, drop if we're too busy
-  [priority]
-  (fn [state]
-    (let [priority (min priority (:turst state 0))
-          trust (- (:trust state) priority)
-          state (assoc state :trust trust)]
-      (if (< 0 priority)
-        (let [n 128
-              average (:average-priority state 0.0)
-              p (min priority (+ average n))
-              average (/ (+ p (* average (dec n))) n)]
-          [priority (assoc state :average-priority average)])
-        [priority state]))))
+  [peer priority]
+  (domonad exception-m
+    [;; TODO: come up with a better load-limit
+     :let [load-limit (+ (network-load peer) (cpu-load peer) (disk-load peer))]
+     :let [priority (if (== 0 load-limit)
+                      (do
+                        (metric-add peer "Filesharing requests done for free" 1)
+                        0)
+                      priority)]
+     trust (fetch-val :trust 0)
+     :let [priority (min priority trust)]
+     _ (update-val :average-priority 0.0
+         #(if (< 0 priority)
+            (let [n 128
+                  p (min priority (+ % n))]
+              (/ (+ p (* % (dec n))) n))
+            %))
+     :when (if (<= load-limit priority)
+             true
+             (do (metric-add peer
+                   "Filesharing requests dropped, priority insufficient" 1)
+               false))
+     _ (set-val :trust (- trust priority))]
+    priority))
+
+(defn forward-request!
+  [peer query-id]
+  (.write *out* (str "Query " query-id " isn't going anywhere\n")))
 
 (defn admit-get!
   [peer remote-peer message]
@@ -65,16 +81,35 @@
                             ((deref (:remote-peers-agent peer))
                               (:return-to get-message))
                             remote-peer)]
-     :when (:is-connected (deref (:state-agent return-to))) ;; TODO: try connect
-     priority (bound-priority (:priority get-message))
+     :when (if (:is-connected (deref (:state-agent return-to)))
+             true
+             ;; TODO: try connect
+             (do (metric-add peer
+                   "Filesharing requests dropped, missing reverse route" 1)
+               false))
+     priority (bound-priority peer (:priority get-message))
      :let [ttl (min ttl-max (:ttl get-message)
                  (* priority ttl-decrement 0.001))]
      :let [ttl (- ttl (* 2 ttl-decrement)
                  (.nextInt (:random peer) ttl-decrement))]
-     duplicate (with-state-field :queries
-                 (fetch-val (:query get-message)))
-     ]
-      nil))
+     :let [start-time (Date.)]]
+    (send-do-exception-m! (:state-agent peer)
+      [query (with-state-field :queries
+               (fetch-val (:query get-message) {}))
+       :let [duplicate (query (:id return-to))]
+       :when (if (nil? duplicate)
+               true
+               (do (metric-add peer "Filehsaring requests dropped, duplicate" 1)
+                 false))
+       _ (with-state-field :queries
+           (set-val (:query get-message)
+             (assoc query (:id return-to)
+               (conj get-message
+                 {:priority priority
+                  :ttl ttl
+                  :start-time start-time
+                  :anonymity 1}))))]
+      (forward-request! peer (:query get-message)))))
 
 (defn admit-put!
   [peer remote-peer message])

@@ -17,7 +17,8 @@
   ;; (java.util.Date) :latency (int, if validated)}
   :transport-addresses-agent
   
-  ;; agent of a map of state (nil for local peer?)
+  ;; agent of a map of state.
+  ;; Remote-peers:
   ;; { (shared between layers)
   ;;  :is-connected (boolean)
   ;;  :connected-transport (value from peer-struct:transports-agent)
@@ -32,7 +33,11 @@
   ;;   (filesharing layer)
   ;;  :trust (int)
   ;;  :average-priority (float)
-  ;;  :queries (map of query hashes to get-messages)}
+  ;; }
+  ;; Local peer:
+  ;; { (filesharing layer)
+  ;;  :queries (map of query hashes to maps of return peer ids to queries)
+  ;; }
   :state-agent)
 
 (def peer-struct (apply create-struct (concat
@@ -83,7 +88,9 @@
     ;; java.util.concurrent.PriorityBlockingQueue of unbounded capacity.
     ;; The size of this queue is an easy measure of our disk load.
     :disk-bound-queue
-    ))))
+    
+    ;; agent of a map of Strings to Numbers.
+    :metrics-agent))))
 
 (defstruct peer-options
   :keypair)
@@ -126,6 +133,7 @@
       :public-key-atom (atom (.getPublic (:keypair options)))
       :id (generate-id (.getPublic (:keypair options)))
       :transport-addresses-agent (agent {})
+      :state-agent (agent {})
       :private-key (.getPrivate (:keypair options))
       :remote-peers-agent (agent {})
       :transports-agent (agent {})
@@ -137,10 +145,12 @@
       :cpu-bound-executor cpu-bound-executor
       :cpu-bound-queue cpu-bound-queue
       :disk-bound-executor disk-bound-executor
-      :disk-bound-queue disk-bound-queue)))
+      :disk-bound-queue disk-bound-queue
+      :metrics-agent (agent {}))))
 
 (defn network-load
   [peer]
+  ;; TODO: figure out if we really need size, it's an O(n) operation
   (.size (:selector-continuations-queue peer)))
 
 (defn cpu-load

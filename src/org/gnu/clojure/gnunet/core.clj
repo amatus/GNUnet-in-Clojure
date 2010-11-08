@@ -336,7 +336,7 @@
       (let [state (if (contains? state :status)
                     state
                     (initialize-remote-peer-state peer state))]
-        (.write *out* (str "Core: " message "\n"))
+        ;; (.write *out* (str "Core: " message "\n"))
         (condp = (:message-type message)
           message-type-core-set-key (handle-set-key! peer remote-peer message)
           message-type-core-encrypted-message (handle-core-encrypted-message!

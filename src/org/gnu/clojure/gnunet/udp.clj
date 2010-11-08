@@ -86,7 +86,7 @@
     (when-let [{udp :message} (first ((parse-message-types
                                         {message-type-udp parse-udp})
                                        (buffer-seq! byte-buffer)))]
-      (if (not (= (:sender-id udp) (:id peer)))
+      (when-not (= (:sender-id udp) (:id peer))
         (doseq [message (:messages udp)]
           (admit-message! peer (:sender-id udp) address message))))))
 
