@@ -2,7 +2,8 @@
   (:use (org.gnu.clojure.gnunet crypto message util))
   (:import java.nio.channels.Selector
     (java.util.concurrent ConcurrentLinkedQueue LinkedBlockingQueue
-      PriorityBlockingQueue ThreadPoolExecutor TimeUnit)
+      PriorityBlockingQueue ScheduledThreadPoolExecutor ThreadPoolExecutor
+      TimeUnit)
     java.security.SecureRandom))
 
 (defstruct remote-peer-struct
@@ -36,7 +37,9 @@
   ;; }
   ;; Local peer:
   ;; { (filesharing layer)
-  ;;  :queries (map of query hashes to maps of return peer ids to queries)
+  ;;  :queries (map of query hashes to maps of return-to peer ids to queries)
+  ;;  :ttl-queue (java.util.PriorityQueue of [query return-to] pairs sorted by
+  ;;              :ttl stored in metadata)
   ;; }
   :state-agent)
 
@@ -90,7 +93,10 @@
     :disk-bound-queue
     
     ;; agent of a map of Strings to Numbers.
-    :metrics-agent))))
+    :metrics-agent
+    
+    ;; java.util.concurrent.ScheduledThreadPoolExecutor
+    :scheduled-executor))))
 
 (defstruct peer-options
   :keypair)
@@ -146,7 +152,8 @@
       :cpu-bound-queue cpu-bound-queue
       :disk-bound-executor disk-bound-executor
       :disk-bound-queue disk-bound-queue
-      :metrics-agent (agent {}))))
+      :metrics-agent (agent {})
+      :scheduled-executor (ScheduledThreadPoolExecutor. 1))))
 
 (defn network-load
   [peer]

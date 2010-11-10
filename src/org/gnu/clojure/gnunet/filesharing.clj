@@ -2,18 +2,20 @@
   (:use (org.gnu.clojure.gnunet bloomfilter crypto exception message metrics
           parser peer)
     clojure.contrib.monads)
-  (:import java.util.Date))
+  (:import (java.util Date PriorityQueue)
+    java.util.concurrent.TimeUnit))
 
 (def message-type-fs-get 137)
 (def message-type-fs-put 138)
 (def message-type-fs-migration-stop 139)
 
-(def bit-return-to 1)
-(def bit-sks-namespace 2)
-(def bit-transmit-to 3)
+(def bit-return-to 0)
+(def bit-sks-namespace 1)
+(def bit-transmit-to 2)
 
 (def ttl-decrement 5000)
 (def ttl-max 1073741824)
+(def max-pending-requests 32768)
 
 (def parse-get-message
   (domonad parser-m
@@ -68,9 +70,39 @@
      _ (set-val :trust (- trust priority))]
     priority))
 
+(defn target-peer-select
+  [query best candidate]
+  (if (= (key candidate) (:return-to query))
+    best
+    ;; TODO: come on, seriously?
+    candidate))
+
 (defn forward-request!
   [peer query-id]
-  (.write *out* (str "Query " query-id " isn't going anywhere\n")))
+  (send-do-exception-m! (:state-agent peer)
+    [query (with-state-field :queries
+             (fetch-val query-id))
+     :when-not (nil? query)
+     :let [send-to (reduce (partial target-peer-select query) nil
+                     (deref (:remote-peers-agent peer)))]
+     :when (if (nil? send-to)
+             (do (.schedule (:scheduled-executor peer)
+                   (partial forward-request! peer query-id)
+                   (+ 1000 (.nextInt (:random peer) ttl-decrement))
+                   TimeUnit/MILLISECONDS)
+               false)
+             true)]
+    (send-do-exception-m! (:state-agent send-to)
+      [is-connected (fetch-val :is-connected)
+       :when is-connected]
+      nil)))
+
+(def ttl-comparator
+  (reify java.util.Comparator
+    (compare [this o1 o2]
+      (clojure.core/compare (:ttl (meta o1)) (:ttl (meta o2))))
+    (equals [this obj]
+      (== (:ttl (meta this)) (:ttl (meta obj))))))
 
 (defn admit-get!
   [peer remote-peer message]
@@ -94,21 +126,35 @@
                  (.nextInt (:random peer) ttl-decrement))]
      :let [start-time (Date.)]]
     (send-do-exception-m! (:state-agent peer)
-      [query (with-state-field :queries
-               (fetch-val (:query get-message) {}))
+      [queries (fetch-val :queries)
+       :let [query (queries (:query get-message) {})]
        :let [duplicate (query (:id return-to))]
        :when (if (nil? duplicate)
                true
                (do (metric-add peer "Filehsaring requests dropped, duplicate" 1)
                  false))
-       _ (with-state-field :queries
-           (set-val (:query get-message)
-             (assoc query (:id return-to)
-               (conj get-message
-                 {:priority priority
-                  :ttl ttl
-                  :start-time start-time
-                  :anonymity 1}))))]
+       :let [queries (assoc queries (:query get-message)
+                       (assoc query (:id return-to)
+                         (conj get-message
+                           {:priority priority
+                            :ttl ttl
+                            :start-time start-time
+                            :anonymity 1})))]
+       ttl-queue (fetch-val :ttl-queue (PriorityQueue. 1 ttl-comparator))
+       :let [_ (.add ttl-queue (with-meta [(:query get-message) (:id return-to)]
+                                 {:ttl (+ ttl (.getTime start-time))}))]
+       :let [_ (metric-set peer
+                 "Filesharing pending requests" (.size ttl-queue))]
+       :let [expired (when (< max-pending-requests (.size ttl-queue))
+                       (.poll ttl-queue))]
+       :let [queries (if (nil? expired)
+                       queries
+                       (let [query (dissoc (queries (first expired))
+                                     (second expired))]
+                         (if (empty? query)
+                           (dissoc queries (first expired))
+                           (assoc queries (first expired) query))))]
+       _ (set-val :queries queries)]
       (forward-request! peer (:query get-message)))))
 
 (defn admit-put!

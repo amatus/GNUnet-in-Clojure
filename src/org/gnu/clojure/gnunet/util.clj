@@ -9,7 +9,7 @@
   [buffer]
   (lazy-seq (when (.hasRemaining buffer)
               (cons (.get buffer) (buffer-seq! buffer)))))
-  
+
 (defn my-max
   "Return the maximum in a collection of comparable values."
   [& coll]
