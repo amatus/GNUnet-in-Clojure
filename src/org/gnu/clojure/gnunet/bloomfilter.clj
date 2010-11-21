@@ -10,6 +10,10 @@
    :size size
    :k k})
 
+(defn encode-bloomfilter
+  [bloomfilter]
+  {:bitmap bloomfilter})
+
 (defn parse-bloomfilter
   [k]
   (domonad parser-m

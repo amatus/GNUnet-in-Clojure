@@ -1,6 +1,6 @@
 (ns org.gnu.clojure.gnunet.filesharing
-  (:use (org.gnu.clojure.gnunet bloomfilter crypto exception message metrics
-          parser peer)
+  (:use (org.gnu.clojure.gnunet bloomfilter core crypto exception message
+          metrics parser peer)
     clojure.contrib.monads)
   (:import (java.util Date PriorityQueue)
     java.util.concurrent.TimeUnit))
@@ -16,6 +16,30 @@
 (def ttl-decrement 5000)
 (def ttl-max 1073741824)
 (def max-pending-requests 32768)
+
+(defn encode-get-message
+  [get-message]
+  (let [hash-bitmap 0
+        hash-bitmap (if (nil? (:return-to get-message))
+                      hash-bitmap
+                      (bit-set hash-bitmap bit-return-to))
+        hash-bitmap (if (nil? (:sks-namespace get-message))
+                      hash-bitmap
+                      (bit-set hash-bitmap bit-sks-namespace))
+        hash-bitmap (if (nil? (:transmit-to get-message))
+                      hash-bitmap
+                      (bit-set hash-bitmap bit-transmit-to))]
+    (concat
+      (encode-int32 (:block-type get-message))
+      (encode-int32 (:priority get-message))
+      (encode-int32 (:ttl get-message))
+      (encode-int32 (:filter-mutator get-message))
+      (encode-int32 hash-bitmap)
+      (:return-to get-message)
+      (:sks-namespace get-message)
+      (:transmit-to get-message)
+      (when (:bloomfilter get-message)
+        (encode-bloomfilter (:bloomfilter get-message))))))
 
 (def parse-get-message
   (domonad parser-m
@@ -70,32 +94,48 @@
      _ (set-val :trust (- trust priority))]
     priority))
 
+(defn get-processing-delay!
+  [peer]
+  (long (+ 1000 (.nextInt (:random peer) ttl-decrement))))
+
 (defn target-peer-select
-  [query best candidate]
-  (if (= (key candidate) (:return-to query))
+  [return-to-id best candidate]
+  (if (= return-to-id (key candidate))
     best
     ;; TODO: come on, seriously?
     candidate))
 
 (defn forward-request!
-  [peer query-id]
+  [peer query-id return-to-id]
   (send-do-exception-m! (:state-agent peer)
     [query (with-state-field :queries
-             (fetch-val query-id))
+             (with-state-field query-id
+               (fetch-val return-to-id)))
      :when-not (nil? query)
-     :let [send-to (reduce (partial target-peer-select query) nil
+     :let [send-to (reduce (partial target-peer-select return-to-id) nil
                      (deref (:remote-peers-agent peer)))]
      :when (if (nil? send-to)
              (do (.schedule (:scheduled-executor peer)
-                   (partial forward-request! peer query-id)
-                   (+ 1000 (.nextInt (:random peer) ttl-decrement))
+                   (partial forward-request! peer query-id return-to-id)
+                   (get-processing-delay! peer)
                    TimeUnit/MILLISECONDS)
+               (metric-add peer
+                 "Filesharing requests delayed, no suitable destination" 1)
                false)
              true)]
     (send-do-exception-m! (:state-agent send-to)
       [is-connected (fetch-val :is-connected)
-       :when is-connected]
-      nil)))
+       status (fetch-val :status)
+       :when (if (and is-connected (== status peer-status-key-confirmed))
+               true
+               (do (.schedule (:scheduled-executor peer)
+                     (partial forward-request! peer query-id return-to-id)
+                     (get-processing-delay! peer)
+                     TimeUnit/MILLISECONDS)
+                 false))]
+      (let [get-message (encode-get-message query)]
+        (core-send! peer send-to
+          {:message-type message-type-fs-get :bytes get-message})))))
 
 (def ttl-comparator
   (reify java.util.Comparator
@@ -126,7 +166,7 @@
                  (.nextInt (:random peer) ttl-decrement))]
      :let [start-time (Date.)]]
     (send-do-exception-m! (:state-agent peer)
-      [queries (fetch-val :queries)
+      [queries (fetch-val :queries {})
        :let [query (queries (:query get-message) {})]
        :let [duplicate (query (:id return-to))]
        :when (if (nil? duplicate)
@@ -139,7 +179,8 @@
                            {:priority priority
                             :ttl ttl
                             :start-time start-time
-                            :anonymity 1})))]
+                            :anonymity 1
+                            :return-to nil})))]
        ttl-queue (fetch-val :ttl-queue (PriorityQueue. 1 ttl-comparator))
        :let [_ (.add ttl-queue (with-meta [(:query get-message) (:id return-to)]
                                  {:ttl (+ ttl (.getTime start-time))}))]
@@ -155,7 +196,7 @@
                            (dissoc queries (first expired))
                            (assoc queries (first expired) query))))]
        _ (set-val :queries queries)]
-      (forward-request! peer (:query get-message)))))
+      (forward-request! peer (:query get-message) (:id return-to)))))
 
 (defn admit-put!
   [peer remote-peer message])

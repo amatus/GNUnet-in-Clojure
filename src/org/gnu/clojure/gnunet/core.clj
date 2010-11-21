@@ -81,10 +81,10 @@
       (encode-utf8 "authentication key"))))
 
 (defn encode-core-ping
-  [ping aes-key remote-peer-id]
-  (let [iv (derive-iv aes-key (:iv-seed ping) remote-peer-id)]
+  [ping aes-key iv-seed remote-peer-id]
+  (let [iv (derive-iv aes-key iv-seed remote-peer-id)]
     (concat
-      (encode-int32 (:iv-seed ping))
+      (encode-int32 iv-seed)
       (aes-encrypt aes-key iv
         (concat
           (:peer-id ping)
@@ -107,11 +107,10 @@
     ping))
 
 (defn encode-core-pong
-  [pong aes-key remote-peer-id]
-  (let [iv (derive-pong-iv aes-key (:iv-seed pong) (:challenge pong)
-             remote-peer-id)]
+  [pong aes-key iv-seed remote-peer-id]
+  (let [iv (derive-pong-iv aes-key iv-seed (:challenge pong) remote-peer-id)]
     (concat
-      (encode-int32 (:iv-seed pong))
+      (encode-int32 iv-seed)
       (aes-encrypt aes-key iv
         (concat
           (encode-int32 (:challenge pong))
@@ -135,6 +134,22 @@
                          plaintext))]
      :when pong]
     pong))
+
+(defn encode-core-encrypted-message
+  [message aes-key iv-seed aes-key-created remote-peer-id]
+  (let [plaintext (concat
+                    (encode-int32 (:sequence-number message))
+                    (encode-int32 (:inbound-bw-limit message))
+                    (encode-date (:timestamp message))
+                    (mapcat encode-message (:messages message)))
+        iv (derive-iv aes-key iv-seed remote-peer-id)
+        ciphertext (aes-encrypt aes-key iv plaintext)
+        auth-key (derive-auth-key aes-key iv-seed aes-key-created)
+        hmac (hmac-sha-512 auth-key ciphertext)]
+    (concat
+      (encode-int32 iv-seed)
+      hmac
+      ciphertext)))
 
 (defn parse-core-encrypted-message
   [aes-key aes-key-created peer-id]
@@ -192,10 +207,9 @@
               set-key (assoc set-key :signature signature)
               encoded-set-key (encode-set-key set-key signed-material)
               iv-seed (.nextInt (:random peer))
-              ping {:iv-seed iv-seed
-                    :challenge challenge
+              ping {:challenge challenge
                     :peer-id (:id remote-peer)}
-              encoded-ping (encode-core-ping ping encrypt-key
+              encoded-ping (encode-core-ping ping encrypt-key iv-seed
                              (:id remote-peer))]
           (emit-messages! peer remote-peer
             [{:message-type message-type-core-set-key :bytes encoded-set-key}
@@ -252,11 +266,10 @@
         (let [bw-in (:bw-in state)
               encrypt-key (:encrypt-key state)
               iv-seed (.nextInt (:random peer))
-              pong {:iv-seed iv-seed
-                    :challenge (:challenge ping)
+              pong {:challenge (:challenge ping)
                     :inbound-bw-limit bw-in
                     :peer-id (:id peer)}
-              encoded-pong (encode-core-pong pong encrypt-key
+              encoded-pong (encode-core-pong pong encrypt-key iv-seed
                              (:id remote-peer))]
           (emit-messages! peer remote-peer
             [{:message-type message-type-core-pong :bytes encoded-pong}]))))))
@@ -327,7 +340,8 @@
      :encrypt-key-created (Date.)
      :ping-challenge (.nextInt (:random peer))
      ;; TODO: Make this a real number
-     :bw-in 20000}))
+     :bw-in 20000
+     :next-sequence-number 1}))
 
 (defn handle-receive!
   [peer remote-peer message]
@@ -345,3 +359,26 @@
           message-type-core-pong (handle-core-pong! peer remote-peer message)
           nil)
         state))))
+
+(defn core-send!
+  [peer remote-peer message]
+  (send-do-exception-m! (:state-agent remote-peer)
+    [status (fetch-val :status)
+     :when (== status peer-status-key-confirmed)
+     encrypt-key (fetch-val :encrypt-key)
+     encrypt-key-created (fetch-val :encrypt-key-created)
+     bw-in (fetch-val :bw-in)
+     seq-num (update-val :next-sequence-number inc)]
+    (.execute (:cpu-bound-executor peer)
+      (fn []
+        (let [iv-seed (.nextInt (:random peer))
+              core-message {:sequence-number seq-num
+                            :inbound-bw-limit bw-in
+                            :timestamp (Date.)
+                            :messages [message]}
+              encoded-message (encode-core-encrypted-message core-message
+                                encrypt-key iv-seed encrypt-key-created
+                                (:id remote-peer))]
+          (emit-messages! peer remote-peer
+            [{:messsage-type message-type-core-encrypted-message
+              :bytes encoded-message}]))))))

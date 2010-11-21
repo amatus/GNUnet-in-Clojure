@@ -31,6 +31,7 @@
   ;;  :encrypt-key-created (java.util.Date)
   ;;  :ping-challenge (int)
   ;;  :bw-in (int)
+  ;;  :last-sequence-number-sent (int)
   ;;   (filesharing layer)
   ;;  :trust (int)
   ;;  :average-priority (float)
