@@ -2,7 +2,7 @@
   (:use (org.gnu.clojure.gnunet inet parser message peer transport util)
     clojure.contrib.monads)
   (:import (java.util Date Calendar)
-    (java.net InetSocketAddress DatagramPacket)
+    java.net.InetSocketAddress
     (java.nio.channels DatagramChannel SelectionKey)
     java.nio.ByteBuffer
     java.util.concurrent.ConcurrentLinkedQueue))
@@ -67,13 +67,13 @@
   (let [transport ((deref (:transports-agent peer)) "udp")]
     (.add (:selector-continuations-queue peer)
       #(let [packet (.poll (:send-queue transport))]
-         (if (not (nil? packet))
+         (if (nil? packet)
+           (.interestOps (:selection-key transport) SelectionKey/OP_READ)
            (try
              (let [byte-buffer (ByteBuffer/wrap (byte-array (:bytes packet)))]
                (.send datagram-channel byte-buffer (:address packet)))
              ((:continuation! packet) true)
-             (catch Exception e ((:continuation! packet) false)))
-           (.interestOps (:selection-key transport) SelectionKey/OP_READ))))))
+             (catch Exception e ((:continuation! packet) false))))))))
 
 (defn handle-channel-readable!
   [peer datagram-channel]
@@ -113,7 +113,6 @@
           (assoc transports "udp"
             {:name "udp"
              :emit-messages! (partial emit-messages-udp! peer)
-             :socket socket
              :selection-key selection-key
              :send-queue (ConcurrentLinkedQueue.)}))))))
 
