@@ -110,9 +110,7 @@
   [parser-map]
   (domonad parser-m
     [message parse-message
-     :let [parser (parser-map (:message-type message))]
-     :when parser
-     :let [parsed (first (parser (:bytes message)))]
-     :when parsed]
+     :when-let [parser (parser-map (:message-type message))]
+     :when-let [parsed (first (parser (:bytes message)))]]
     {:message-type (:message-type message)
      :message parsed}))

@@ -1,8 +1,7 @@
 (ns org.gnu.clojure.gnunet.udp
   (:use (org.gnu.clojure.gnunet inet parser message peer transport util)
     clojure.contrib.monads)
-  (:import (java.util Date Calendar)
-    java.net.InetSocketAddress
+  (:import java.net.InetSocketAddress
     (java.nio.channels DatagramChannel SelectionKey)
     java.nio.ByteBuffer
     java.util.concurrent.ConcurrentLinkedQueue))
@@ -28,21 +27,6 @@
      :bytes (encode-udp
               {:sender-id (:id peer) :messages messages})}))
 
-(defn configure-udp-addresses!
-  "Adds new addresses for the udp transport to peer's transports-agent and
-   removes expired addresses." 
-  [peer reachable-addresses port]
-  (send (:transport-addresses-agent peer)
-    (fn [addresses]
-      (merge-transport-addresses {}
-        (expire-transport-addresses (Date.)
-          (concat (list-transport-addresses addresses)
-            (for [address reachable-addresses]
-              {:transport "udp"
-               :encoded-address (encode-address (InetSocketAddress. address
-                                                  port))
-               :expiration (hello-address-expiration)})))))))
-
 (defn emit-messages-udp!
   [peer transport remote-peer encoded-address continuation! messages]
   ;;(doseq [message messages]
@@ -62,7 +46,7 @@
       (.wakeup (:selector peer)))
     (when continuation! (continuation! false))))
 
-(defn handle-channel-writable!
+(defn handle-datagram-channel-writable!
   [peer datagram-channel]
   (let [transport ((deref (:transports-agent peer)) "udp")]
     (.add (:selector-continuations-queue peer)
@@ -75,7 +59,7 @@
              ((:continuation! packet) true)
              (catch Exception e ((:continuation! packet) false))))))))
 
-(defn handle-channel-readable!
+(defn handle-datagram-channel-readable!
   [peer datagram-channel]
   (let [byte-buffer (doto (ByteBuffer/allocate max-udp-packet-length) (.clear))
         source-address (.receive datagram-channel byte-buffer)
@@ -90,12 +74,12 @@
         (doseq [message (:messages udp)]
           (admit-message! peer (:sender-id udp) address message))))))
 
-(defn handle-channel-selected!
+(defn handle-datagram-channel-selected!
   [peer datagram-channel selection-key]
   (if (.isReadable selection-key)
-    (handle-channel-readable! peer datagram-channel))
+    (handle-datagram-channel-readable! peer datagram-channel))
   (if (.isWritable selection-key)
-    (handle-channel-writable! peer datagram-channel)))
+    (handle-datagram-channel-writable! peer datagram-channel)))
 
 (defn register-datagram-channel!
   [peer port]
@@ -106,7 +90,7 @@
     (let [selection-key (.register datagram-channel
                           (:selector peer)
                           SelectionKey/OP_READ
-                          (partial handle-channel-selected!
+                          (partial handle-datagram-channel-selected!
                             peer datagram-channel))]
       (send (:transports-agent peer)
         (fn [transports]

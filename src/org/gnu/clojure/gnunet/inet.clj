@@ -1,7 +1,8 @@
 (ns org.gnu.clojure.gnunet.inet
-  (:use (org.gnu.clojure.gnunet parser message)
+  (:use (org.gnu.clojure.gnunet message parser transport)
     clojure.contrib.monads)
-  (:import (java.net InetAddress InetSocketAddress NetworkInterface)))
+  (:import (java.net InetAddress InetSocketAddress NetworkInterface)
+    java.util.Date))
 
 (defn encode-address
   [inet-socket-address]
@@ -29,3 +30,18 @@
   (for [interface (enumeration-seq (NetworkInterface/getNetworkInterfaces))
         address (enumeration-seq (.getInetAddresses interface))]
     address))
+
+(defn configure-inet-addresses!
+  "Adds new addresses for the transport to peer's transports-agent and
+   removes expired addresses." 
+  [peer transport reachable-addresses port]
+  (send (:transport-addresses-agent peer)
+    (fn [addresses]
+      (merge-transport-addresses {}
+        (expire-transport-addresses (Date.)
+          (concat (list-transport-addresses addresses)
+            (for [address reachable-addresses]
+              {:transport transport
+               :encoded-address (encode-address
+                                  (InetSocketAddress. address port))
+               :expiration (hello-address-expiration)})))))))
