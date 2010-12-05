@@ -45,7 +45,7 @@
 
 (defn encode-pong-signed-material
   [pong]
-  (let [transport (encode-utf8 (:transport pong))
+  (let [transport (when (:transport pong) (encode-utf8 (:transport pong)))
         address-length (+ (count transport) (count (:encoded-address pong)))]
     (encode-signed (:signature-purpose pong)
       (concat
@@ -252,13 +252,31 @@
 
 (defn send-pong-using!
   [peer remote-peer ping]
-  (.write *out* "We don't send PONG_USING yet!\n"))
+  (.execute (:cpu-bound-executor peer)
+    (fn []
+      (let [pong {:challenge (:challenge ping)
+                  :signature-purpose signature-purpose-pong-using
+                  :expiration (pong-expiration)
+                  :peer-id (:id peer)}
+            signed-material (encode-pong-signed-material pong)
+            signature (rsa-sign (:private-key peer) signed-material)
+            pong (assoc pong :signature signature)
+            encoded-pong (encode-pong pong signed-material)]
+        ;; XXX: gnunet looks for a "reliable" connection for the pong before
+        ;; sending to every known address.
+        (doseq [transports (deref (:transport-addresses-agent remote-peer))
+                address (val transports)]
+          (when-let [transport ((deref (:transports-agent peer))
+                                 (key transports))]
+            ((:emit-messages! transport) transport remote-peer (key address)
+              nil
+              [{:message-type message-type-pong :bytes encoded-pong}])))))))
 
 (defn handle-ping!
   [peer remote-peer message]
   (when-let [ping (first (parse-ping (:bytes message)))]
     (cond
-      (not (= (:peer-id ping) (seq (:id peer)))) nil
+      (not (= (:peer-id ping) (:id peer))) nil
       (:transport ping) (send-pong-own! peer remote-peer ping)
       :else (send-pong-using! peer remote-peer ping))))
 
@@ -299,7 +317,7 @@
 
 (defn emit-continuation!
   [peer transport remote-peer encoded-address result]
-  (if result
+  (when result
     (let [addresses ((deref (:transport-addresses-agent remote-peer))
                       (:name transport))
           address (addresses encoded-address)]

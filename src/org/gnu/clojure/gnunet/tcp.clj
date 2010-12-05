@@ -59,23 +59,31 @@
       [:when-let [welcome (first (parse-welcome (:bytes message)))]
        connection (fetch-val [:connection encoded-address])
        :when-not (nil? connection)
+       ;; XXX: This is weird because for an outgoing connection we don't check
+       ;; that the peer-id matches who we thought we connected to.
        _ (set-val [:connection encoded-address]
-           (assoc connection :remote-peer-id (:peer-id welcome)))]
+           (conj connection {:remote-peer-id (:peer-id welcome)
+                             :received-welcome true}))]
       (do
-        (when (and (nil? (:remote-peer-id connection))
-                (:incoming connection))
+        (when (nil? (:remote-peer-id connection))  
           (.add (:send-queue connection)
             {:bytes (generate-welcome-message peer)
              :continuation! identity}))
-        (update-selection-key-async! peer selection-key
-          (bit-or SelectionKey/OP_READ SelectionKey/OP_WRITE))))
-    (when-let [remote-peer-id (:remote-peer-id
-                                ((deref (:sessions-agent transport))
-                                  [:connection encoded-address]))]
-      (let [address {:transport "tcp"
-                     :encoded-address encoded-address
-                     :expiration (idle-connection-timeout)}]
-        (admit-message! peer remote-peer-id address message)))))
+        ;; We have to send again to make sure our update to the sessions-agent
+        ;; is finished before updating the selection-key
+        (send (:sessions-agent transport)
+          (fn [sessions]
+            (update-selection-key-async! peer selection-key
+              (bit-or SelectionKey/OP_READ SelectionKey/OP_WRITE))
+            sessions))))
+    (send-do-exception-m! (:sessions-agent transport)
+      [connection (fetch-val [:connection encoded-address])
+       :when-let [remote-peer-id (:remote-peer-id connection)]
+       :when (:received-welcome connection)
+       :let [address {:transport "tcp"
+                      :encoded-address encoded-address
+                      :expiration (idle-connection-timeout)}]]
+      (admit-message! peer remote-peer-id address message))))
 
 (defn handle-socket-channel-connectable!
   [peer transport encoded-address selection-key]
@@ -178,6 +186,7 @@
                    {:socket-channel socket-channel
                     :selection-key selection-key
                     :send-queue send-queue
+                    :remote-peer-id (:id remote-peer)
                     :received-bytes []})]
               (do
                 (.connect socket-channel address)
