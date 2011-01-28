@@ -6,9 +6,9 @@
 
 (defn encode-address
   [inet-socket-address]
-  (concat
-    (.getAddress (.getAddress inet-socket-address))
-    (encode-int16 (.getPort inet-socket-address))))
+  (vec (concat
+         (.getAddress (.getAddress inet-socket-address))
+         (encode-int16 (.getPort inet-socket-address)))))
 
 (def parse-address
   (match-one

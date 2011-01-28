@@ -27,6 +27,8 @@
 (defn handle-disconnect!
   [peer transport encoded-address selection-key]
   ;; This is always called from inside the selector thread
+  (assert-args handle-disconnect!
+    (vector? encoded-address) "encoded-address as vector")
   (.cancel selection-key)
   (.close (.channel selection-key))
   (send-do-exception-m! (:sessions-agent transport)
@@ -54,6 +56,8 @@
 
 (defn admit-tcp-message!
   [peer transport encoded-address selection-key message]
+  (assert-args admit-tcp-message!
+    (vector? encoded-address) "encoded-address as vector")
   (if (== message-type-tcp-welcome (:message-type message))
     (send-do-exception-m! (:sessions-agent transport)
       [:when-let [welcome (first (parse-welcome (:bytes message)))]
@@ -93,6 +97,8 @@
 
 (defn handle-socket-channel-readable!
   [peer transport encoded-address selection-key]
+  (assert-args handle-socket-channel-readable!
+    (vector? encoded-address) "encoded-address as vector")
   (let [socket-channel (.channel selection-key)
         socket (.socket socket-channel)
         buffer-length (.getReceiveBufferSize socket)
@@ -120,6 +126,8 @@
   ;; selector-continuations-queue because we want to make sure we set the
   ;; interest ops on the selection-key after any other continuations that might
   ;; be setting OP_WRITE.
+  (assert-args handle-socket-channel-writable!
+    (vector? encoded-address) "encoded-address as vector")
   (.add (:selector-continuations-queue peer)
     #(let [sessions (deref (:sessions-agent transport))]
        (when-let [connection (sessions [:connection encoded-address])]
@@ -164,6 +172,8 @@
 
 (defn set-connection-writable-or-connect!
   [peer transport remote-peer encoded-address]
+  (assert-args set-connection-writable-or-connect!
+    (vector? encoded-address) "encoded-address as vector")
   (if-let [connection ((deref (:sessions-agent transport))
                         [:connection encoded-address])]
     (set-connection-writable! peer remote-peer connection)
@@ -201,6 +211,8 @@
 
 (defn emit-messages-tcp!
   [peer transport remote-peer encoded-address continuation! messages]
+  (assert-args emit-tcp-message!
+    (vector? encoded-address) "encoded-address as vector")
   (send-do-exception-m! (:sessions-agent transport)
     [:let [continuation! #(do (emit-continuation! peer transport remote-peer
                                 encoded-address %)

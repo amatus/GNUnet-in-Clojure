@@ -229,19 +229,23 @@
                                (:transport ping))
          ;; XXX: Here we're looking for an exact match, gnunet allows transport
          ;; plugins to do inexact matches.
-         :when (contains? transport-addresses (:encoded-address ping))]
-        (let [pong {:challenge (:challenge ping)
-                    :signature-purpose signature-purpose-pong-own
-                    :expiration (pong-expiration)
-                    :peer-id (:id peer)
-                    :transport (:transport ping)
-                    :encoded-address (:encoded-address ping)}
-              signed-material (encode-pong-signed-material pong)
-              signature (rsa-sign (:private-key peer) signed-material)
-              pong (assoc pong :signature signature)
-              encoded-pong (encode-pong pong signed-material)]
-          ;; XXX: gnunet looks for a "reliable" connection for the pong before
-          ;; sending to every known address.
+         :when (contains? transport-addresses (:encoded-address ping))
+         pong {:challenge (:challenge ping)
+               :signature-purpose signature-purpose-pong-own
+               :expiration (pong-expiration)
+               :peer-id (:id peer)
+               :transport (:transport ping)
+               :encoded-address (:encoded-address ping)}
+         signed-material (encode-pong-signed-material pong)
+         signature (rsa-sign (:private-key peer) signed-material)
+         pong (assoc pong :signature signature)
+         encoded-pong (encode-pong pong signed-material)
+         state (deref (:state-agent remote-peer))]
+        (if (:is-connected state)
+          (let [transport (:connected-transport state)
+                encoded-address (:connected-address state)]
+            ((:emit-messages! transport) transport remote-peer encoded-address
+              nil [{:message-type message-type-pong :bytes encoded-pong}]))
           (doseq [transports (deref (:transport-addresses-agent remote-peer))
                   address (val transports)]
             (when-let [transport ((deref (:transports-agent peer))
@@ -251,34 +255,42 @@
                 [{:message-type message-type-pong :bytes encoded-pong}]))))))))
 
 (defn send-pong-using!
-  [peer remote-peer ping]
+  [peer remote-peer address ping]
   (.execute (:cpu-bound-executor peer)
     (fn []
-      (let [pong {:challenge (:challenge ping)
-                  :signature-purpose signature-purpose-pong-using
-                  :expiration (pong-expiration)
-                  :peer-id (:id peer)}
-            signed-material (encode-pong-signed-material pong)
-            signature (rsa-sign (:private-key peer) signed-material)
-            pong (assoc pong :signature signature)
-            encoded-pong (encode-pong pong signed-material)]
-        ;; XXX: gnunet looks for a "reliable" connection for the pong before
-        ;; sending to every known address.
-        (doseq [transports (deref (:transport-addresses-agent remote-peer))
-                address (val transports)]
-          (when-let [transport ((deref (:transports-agent peer))
-                                 (key transports))]
-            ((:emit-messages! transport) transport remote-peer (key address)
-              nil
-              [{:message-type message-type-pong :bytes encoded-pong}])))))))
+      (let
+        [state (deref (:state-agent remote-peer))
+         pong {:challenge (:challenge ping)
+               :signature-purpose signature-purpose-pong-using
+               :expiration (pong-expiration)
+               :peer-id (:id remote-peer)
+               :transport (:transport address)
+               :encoded-address (:encoded-address address)}
+         signed-material (encode-pong-signed-material pong)
+         signature (rsa-sign (:private-key peer) signed-material)
+         pong (assoc pong :signature signature)
+         encoded-pong (encode-pong pong signed-material)
+         state (deref (:state-agent remote-peer))]
+        (if (:is-connected state)
+          (let [transport (:connected-transport state)
+                encoded-address (:connected-address state)]
+            ((:emit-messages! transport) transport remote-peer encoded-address
+              nil [{:message-type message-type-pong :bytes encoded-pong}]))
+          (doseq [transports (deref (:transport-addresses-agent remote-peer))
+                  address (val transports)]
+            (when-let [transport ((deref (:transports-agent peer))
+                                   (key transports))]
+              ((:emit-messages! transport) transport remote-peer (key address)
+                nil
+                [{:message-type message-type-pong :bytes encoded-pong}]))))))))
 
 (defn handle-ping!
-  [peer remote-peer message]
+  [peer remote-peer address message]
   (when-let [ping (first (parse-ping (:bytes message)))]
     (cond
       (not (= (:peer-id ping) (:id peer))) nil
       (:transport ping) (send-pong-own! peer remote-peer ping)
-      :else (send-pong-using! peer remote-peer ping))))
+      :else (send-pong-using! peer remote-peer address ping))))
 
 (defn handle-pong-own!
   [peer remote-peer pong]
@@ -338,7 +350,7 @@
             remote-peer (remote-peers sender-id)]
         (condp = (:message-type message)
           message-type-hello (handle-hello! peer message)
-          message-type-ping (handle-ping! peer remote-peer message)
+          message-type-ping (handle-ping! peer remote-peer address message)
           message-type-pong (handle-pong! peer message)
           (handle-receive! peer remote-peer message))
         remote-peers))))

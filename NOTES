@@ -6,4 +6,4 @@
 (activate-tcp! my-peer 5678)
 (configure-inet-addresses! my-peer "tcp" (get-local-addresses) 5678)
 (activate-filesharing! my-peer)
-(download-hostlist! (partial admit-hello! my-peer) "http://192.168.8.2:58080")
+(download-hostlist! (partial admit-hello! my-peer) "http://localhost:58080")
