@@ -1,10 +1,10 @@
 (ns org.gnu.clojure.gnunetapplet.applet
-  (:use (org.gnu.clojure.gnunet crypto exception)
-    clojure.contrib.monads)
-  (:use [clojure.main :only (repl)])
+  (:use clojure.contrib.monads
+    [clojure.main :only (repl)]
+    (org.gnu.clojure.gnunet crypto exception))
   (:import
     clojure.lang.LineNumberingPushbackReader
-    (java.io ByteArrayOutputStream InputStreamReader OutputStreamWriter
+    (java.io InputStreamReader OutputStreamWriter
       PipedInputStream PipedOutputStream PrintWriter)
     (netscape.javascript JSObject JSException))
   (:gen-class
@@ -12,8 +12,11 @@
    :state state
    :init ctor
    :main false
+   :set-context-classloader true
    :methods [[ver [] String]
-             [in [String] Void]]))
+             [write [String] Void]]))
+
+(def applet-ns *ns*)
 
 (defn -ctor
   "The job of this constructor is to initialize state. The rest of the
@@ -21,51 +24,52 @@
   []
   [[] (agent {})])
 
+(defn jscall
+  [applet f & args]
+  (try
+    (.call (JSObject/getWindow applet) f (object-array args))
+    (catch JSException e
+      (.printStackTrace e))))
+
 (defn my-repl
   [applet]
   (.setContextClassLoader (Thread/currentThread)
     (.getClassLoader (.getClass applet)))
   (let [input (PipedOutputStream.)
-        stdin (LineNumberingPushbackReader.
-                (InputStreamReader.
-                  (PipedInputStream. input)))
-        stdout (OutputStreamWriter.
-                 (proxy [ByteArrayOutputStream] []
-                   (flush []
-                     (let [output (str this)]
-                       (.reset this)
-                       (try
-                         (.call (JSObject/getWindow applet)
-                           "out" (object-array [output]))
-                         (catch JSException e nil))))))
-        stderr (PrintWriter.
-                 (OutputStreamWriter.
-                   (proxy [ByteArrayOutputStream] []
-                     (flush []
-                       (let [output (str this)]
-                         (.reset this)
-                         (try
-                           (.call (JSObject/getWindow applet)
-                             "err" (object-array [output]))
-                           (catch JSException e nil)))))))]
-    (send (.state applet)
-      (fn [state]
-        (assoc state :input input)))
-    (with-bindings {#'*in* stdin #'*out* stdout #'*err* stderr} (repl))))
+        in (LineNumberingPushbackReader.
+             (InputStreamReader. (PipedInputStream. input)))
+        out (OutputStreamWriter.
+              (proxy [java.io.ByteArrayOutputStream] []
+                (flush []
+                  (jscall applet "out" (str this))
+                  (.reset this))))
+        err (PrintWriter.
+              (OutputStreamWriter.
+                (proxy [java.io.ByteArrayOutputStream] []
+                  (flush []
+                    (jscall applet "err" (str this))
+                    (.reset this))))
+              true)]
+    (send (.state applet) #(assoc % :input input))
+    (declare *applet*)
+    (with-bindings {#'*in* in
+                    #'*out* out
+                    #'*err* err
+                    #'*ns* applet-ns
+                    #'*applet* applet}
+      (repl))))
 
 (defn -init
   [this]
   (let [thread (Thread. (partial my-repl this))]
     (.start thread)
-    (send (.state this)
-      (fn [state]
-        (assoc state :repl-thread thread)))))
+    (send (.state this) #(assoc % :repl-thread thread))))
 
 (defn -ver
   [this]
-  "0.5")
+  "0.12")
 
-(defn -in
+(defn -write
   [this string]
   (when-let [input (:input (deref (.state this)))]
     (.write input (.getBytes string))))
