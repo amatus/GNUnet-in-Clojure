@@ -1,15 +1,18 @@
 (ns org.gnu.clojure.gnunet.crypto
-  (:use (org.gnu.clojure.gnunet parser message primes)
-    clojure.contrib.monads clojure.test)
+  (:use clojure.contrib.monads
+    clojure.test
+    (org.gnu.clojure.gnunet message parser primes))
   (:import java.math.BigInteger
+    (java.security KeyFactory KeyPairGenerator MessageDigest Signature)
+    (java.security.spec PKCS8EncodedKeySpec RSAKeyGenParameterSpec
+      RSAPrivateCrtKeySpec RSAPublicKeySpec)
+    java.util.Locale
     java.util.zip.CRC32
-    (java.security KeyPairGenerator KeyFactory MessageDigest Signature)
-    (java.security.spec RSAKeyGenParameterSpec RSAPublicKeySpec
-                        RSAPrivateCrtKeySpec)
-    (javax.crypto Cipher KeyGenerator SecretKeyFactory Mac)
-    (javax.crypto.spec SecretKeySpec IvParameterSpec)))
+    (javax.crypto Cipher KeyGenerator Mac SecretKeyFactory)
+    (javax.crypto.spec IvParameterSpec SecretKeySpec)))
 
 (def hash-size 64)
+(def ascii-hash-size (quot (+ 4 (* 64 8)) 5))
 (def signature-size 256)
 (def aes-key-size 32)
 (def aes-iv-size (/ aes-key-size 2))
@@ -18,6 +21,64 @@
   "Compute the SHA-512 digest of a sequence of bytes."
   [byte-seq]
   (.digest (MessageDigest/getInstance "SHA-512") (byte-array byte-seq)))
+
+(with-test
+(defn encode-ascii-hash
+  [byte-seq]
+  (let [padded (concat byte-seq [(byte 0)])
+        uint (decode-uint padded)
+        base32 (.toString uint 32)
+        unpadded (.substring base32 0 (dec (.length base32)))
+        upper (.toUpperCase unpadded Locale/ENGLISH)
+        padded2 (concat (repeat (- ascii-hash-size (.length upper)) \0) upper)]
+    (String. (char-array padded2))))
+(is (= (encode-ascii-hash (repeat hash-size (byte 0)))
+      (String. (char-array (repeat ascii-hash-size \0)))))
+(is (= (encode-ascii-hash
+         (map #(.byteValue %)
+           [   0    0    0    0    0
+              -1   -1   -1   -1   -1
+               0    0    0    0    1
+            -128    0    0    0    0
+               0   68   50   20  -57
+              66   84  -74   53  -49
+            -124  101   58   86  -41
+             -58  117  -66  119  -33
+              40   41   42   43   44
+              45   46   47   48   49
+              50   51   52   53   54
+              55   56   57   58   59
+              60   61   62   63]))
+      "00000000VVVVVVVV00000001G00000000123456789ABCDEFGHIJKLMNOPQRSTUV50KIKAPC5KN2UC1H68PJ8D9M6SS3IEHR7GUJSFO")))
+         
+(with-test
+(defn decode-ascii-hash
+  [string]
+  (let [padded (concat string "0")
+        uint (BigInteger. (String. (char-array padded)) 32)
+        binary (encode-int uint)
+        unpadded (butlast binary)
+        padded2 (concat (repeat (- hash-size (count unpadded)) (byte 0))
+                  unpadded)]
+    (vec padded2)))
+(is (= (decode-ascii-hash (String. (char-array (repeat ascii-hash-size \0))))
+      (repeat hash-size (byte 0))))
+(is (= (decode-ascii-hash
+         "00000000VVVVVVVV00000001G00000000123456789ABCDEFGHIJKLMNOPQRSTUV50KIKAPC5KN2UC1H68PJ8D9M6SS3IEHR7GUJSFO")
+      (map #(.byteValue %)
+        [   0    0    0    0    0
+           -1   -1   -1   -1   -1
+            0    0    0    0    1
+         -128    0    0    0    0
+            0   68   50   20  -57
+           66   84  -74   53  -49
+         -124  101   58   86  -41
+          -58  117  -66  119  -33
+           40   41   42   43   44
+           45   46   47   48   49
+           50   51   52   53   54
+           55   56   57   58   59
+           60   61   62   63]))))
 
 (defn hmac-sha-512
   [key-seq byte-seq]
@@ -185,12 +246,16 @@
     (.generatePublic keyfactory keyspec)))
 
 (defn make-rsa-private-key
-  "Make an RSA private key from PKCS#1 values."
-  [e n p q d u dp dq]
-  (let [keyfactory (KeyFactory/getInstance "RSA")
-        ;; Swap p and q, in java q < p
-        keyspec (RSAPrivateCrtKeySpec. n e d q p dq dp u)]
-    (.generatePrivate keyfactory keyspec)))
+  "Make an RSA private key from PKCS#1 values or PKCS#8 encoded."
+  ([e n p q d u dp dq]
+    (let [keyfactory (KeyFactory/getInstance "RSA")
+          ;; Swap p and q, in java q < p
+          keyspec (RSAPrivateCrtKeySpec. n e d q p dq dp u)]
+      (.generatePrivate keyfactory keyspec)))
+  ([byte-seq]
+    (let [keyfactory (KeyFactory/getInstance "RSA")
+          keyspec (PKCS8EncodedKeySpec. (byte-array byte-seq))]
+      (.generatePrivate keyfactory keyspec))))
 
 (defn rsa-sign
   [private-key byte-seq]

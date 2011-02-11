@@ -1,14 +1,14 @@
 (ns org.gnu.clojure.gnunet.metrics)
 
-(defn metric-set
+(defn metric-set!
   [peer metric value]
   (send (:metrics-agent peer)
     (fn [metrics]
       (assoc metrics metric value))))
 
-(defn metric-add
+(defn metric-add!
   ([peer metric value]
-    (metric-add peer metric value 0))
+    (metric-add! peer metric value 0))
   ([peer metric value zero]
     (send (:metrics-agent peer)
       (fn [metrics]

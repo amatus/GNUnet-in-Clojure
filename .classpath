@@ -11,5 +11,6 @@
 	<classpathentry kind="lib" path="macro-utils-1.3.0-SNAPSHOT.jar"/>
 	<classpathentry kind="lib" path="types-1.3.0-SNAPSHOT.jar"/>
 	<classpathentry kind="lib" path="generic-1.3.0-SNAPSHOT.jar"/>
+	<classpathentry kind="lib" path="json-1.3.0-SNAPSHOT.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

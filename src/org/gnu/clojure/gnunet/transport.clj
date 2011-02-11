@@ -153,7 +153,7 @@
     (expire-transport-addresses (Date.)
       (concat (list-transport-addresses addresses) new-addresses))))
 
-(defn update-remote-peers
+(defn update-remote-peers!
   [remote-peers peer-id hello]
   (let [remote-peer (remote-peers peer-id)]
     (if remote-peer
@@ -174,7 +174,7 @@
                                          (:transport-addresses hello)))
           :state-agent (agent {:is-connected false}))))))
 
-(defn verify-transport-address
+(defn verify-transport-address!
   [peer remote-peer address]
   (second
     ((domonad exception-m
@@ -193,17 +193,17 @@
          [(hello-for-peer-message peer)
           (ping-message remote-peer address challenge)])) address)))
 
-(defn verify-transport-addresses
+(defn verify-transport-addresses!
   [addresses peer remote-peer]
   (merge-transport-addresses {}
-    (map (partial verify-transport-address peer remote-peer)
+    (map (partial verify-transport-address! peer remote-peer)
       (list-transport-addresses addresses))))
 
-(defn verify-remote-peers
+(defn verify-remote-peers!
   [remote-peers peer]
   (doseq [[_ remote-peer] remote-peers]
     (send (:transport-addresses-agent remote-peer)
-      verify-transport-addresses peer remote-peer))
+      verify-transport-addresses! peer remote-peer))
   remote-peers)
 
 (defn admit-hello!
@@ -212,8 +212,8 @@
   (let [peer-id (generate-id (:public-key hello))]
     (if (not (= peer-id (:id peer)))
       (let [remote-peers-agent (:remote-peers-agent peer)]
-        (send remote-peers-agent update-remote-peers peer-id hello)
-        (send remote-peers-agent verify-remote-peers peer)))))
+        (send remote-peers-agent update-remote-peers! peer-id hello)
+        (send remote-peers-agent verify-remote-peers! peer)))))
 
 (defn handle-hello!
   [peer message]
@@ -309,7 +309,7 @@
                  {:expiration (hello-address-expiration)
                   :latency (- (.getTime (Date.))
                              (.getTime (:send-time address)))}))]
-          (metric-add peer "Peer addresses considered valid" 1))))))
+          (metric-add! peer "Peer addresses considered valid" 1))))))
 
 (defn handle-pong-using!
   [peer remote-peer pong]
@@ -345,7 +345,7 @@
   ;; (.write *out* (str "Received " message "\n"))
   (send (:remote-peers-agent peer)
     (fn [remote-peers]
-      (let [remote-peers (update-remote-peers remote-peers
+      (let [remote-peers (update-remote-peers! remote-peers
                            sender-id {:transport-addresses [address]})
             remote-peer (remote-peers sender-id)]
         (condp = (:message-type message)

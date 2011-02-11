@@ -75,7 +75,7 @@
      :let [load-limit (+ (network-load peer) (cpu-load peer) (disk-load peer))]
      :let [priority (if (== 0 load-limit)
                       (do
-                        (metric-add peer "Filesharing requests done for free" 1)
+                        (metric-add! peer "Filesharing requests done for free" 1)
                         0)
                       priority)]
      trust (fetch-val :trust 0)
@@ -88,7 +88,7 @@
             %))
      :when (if (<= load-limit priority)
              true
-             (do (metric-add peer
+             (do (metric-add! peer
                    "Filesharing requests dropped, priority insufficient" 1)
                false))
      _ (set-val :trust (- trust priority))]
@@ -119,7 +119,7 @@
                    (partial forward-request! peer query-id return-to-id)
                    (get-processing-delay! peer)
                    TimeUnit/MILLISECONDS)
-               (metric-add peer
+               (metric-add! peer
                  "Filesharing requests delayed, no suitable destination" 1)
                false)
              true)]
@@ -156,7 +156,7 @@
      :when (if (:is-connected (deref (:state-agent return-to)))
              true
              ;; TODO: try connect
-             (do (metric-add peer
+             (do (metric-add! peer
                    "Filesharing requests dropped, missing reverse route" 1)
                false))
      priority (bound-priority peer (:priority get-message))
@@ -171,7 +171,7 @@
        :let [duplicate (query (:id return-to))]
        :when (if (nil? duplicate)
                true
-               (do (metric-add peer "Filehsaring requests dropped, duplicate" 1)
+               (do (metric-add! peer "Filehsaring requests dropped, duplicate" 1)
                  false))
        :let [queries (assoc queries (:query get-message)
                        (assoc query (:id return-to)
@@ -184,7 +184,7 @@
        ttl-queue (fetch-val :ttl-queue (PriorityQueue. 1 ttl-comparator))
        :let [_ (.add ttl-queue (with-meta [(:query get-message) (:id return-to)]
                                  {:ttl (+ ttl (.getTime start-time))}))]
-       :let [_ (metric-set peer
+       :let [_ (metric-set! peer
                  "Filesharing pending requests" (.size ttl-queue))]
        :let [expired (when (< max-pending-requests (.size ttl-queue))
                        (.poll ttl-queue))]

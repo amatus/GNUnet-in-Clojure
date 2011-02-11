@@ -1,12 +1,15 @@
 (ns org.gnu.clojure.gnunetapplet.applet
-  (:use clojure.contrib.monads
+  (:use (clojure.contrib json monads)
     [clojure.main :only (repl)]
-    (org.gnu.clojure.gnunet crypto exception))
+    (org.gnu.clojure.gnunet crypto hostlist inet peer tcp transport)
+    org.gnu.clojure.gnunetapplet.base64)
   (:import
     clojure.lang.LineNumberingPushbackReader
     (java.io InputStreamReader OutputStreamWriter
       PipedInputStream PipedOutputStream PrintWriter)
-    (netscape.javascript JSObject JSException))
+    java.security.SecureRandom
+    java.util.concurrent.Executors
+    netscape.javascript.JSObject)
   (:gen-class
    :extends java.applet.Applet
    :state state
@@ -14,7 +17,16 @@
    :main false
    :set-context-classloader true
    :methods [[ver [] String]
-             [write [String] Void]]))
+             [repl [netscape.javascript.JSObject
+                    netscape.javascript.JSObject]
+              java.io.PipedOutputStream]
+             [write [java.io.PipedOutputStream String] Void]
+             [generateKey [netscape.javascript.JSObject] Void]
+             [startPeer [String netscape.javascript.JSObject] Void]
+             [configureTCP [clojure.lang.APersistentMap Integer] Void]
+             [watchPeers [clojure.lang.APersistentMap
+                          netscape.javascript.JSObject] Void]
+             [fetchHostlist [clojure.lang.APersistentMap String] Void]]))
 
 (def applet-ns *ns*)
 
@@ -22,54 +34,157 @@
   "The job of this constructor is to initialize state. The rest of the
    initalization happens in the Applet init method."
   []
-  [[] (agent {})])
+  ;; Instead of (set! *warn-on-reflection* true)
+  ;;(push-thread-bindings {#'*warn-on-reflection* true})
+  [[] (ref {})])
 
-(defn jscall
+(defn jscall-wait
   [applet f & args]
   (try
     (.call (JSObject/getWindow applet) f (object-array args))
-    (catch JSException e
-      (.printStackTrace e))))
+    (catch Exception e
+      (.printStackTrace e (System/err)))))
+  
+(defn jscall
+  "Call a javascript function named f with args."
+  [applet f & args]
+  (.execute (:js-executor @(.state applet))
+    #(apply jscall-wait applet f args))) 
 
-(defn my-repl
-  [applet]
-  (.setContextClassLoader (Thread/currentThread)
-    (.getClassLoader (.getClass applet)))
-  (let [input (PipedOutputStream.)
-        in (LineNumberingPushbackReader.
-             (InputStreamReader. (PipedInputStream. input)))
-        out (OutputStreamWriter.
-              (proxy [java.io.ByteArrayOutputStream] []
-                (flush []
-                  (jscall applet "out" (str this))
-                  (.reset this))))
-        err (PrintWriter.
-              (OutputStreamWriter.
-                (proxy [java.io.ByteArrayOutputStream] []
-                  (flush []
-                    (jscall applet "err" (str this))
-                    (.reset this))))
-              true)]
-    (send (.state applet) #(assoc % :input input))
-    (declare *applet*)
-    (with-bindings {#'*in* in
-                    #'*out* out
-                    #'*err* err
-                    #'*ns* applet-ns
-                    #'*applet* applet}
-      (repl))))
+(defn jsobject-call
+  "Call a javascript function f with args."
+  [applet ^JSObject f & args]
+  (.execute (:js-executor @(.state applet))
+    (fn []
+      (try
+        (.call f "call" (object-array (cons nil args)))
+        (catch Exception e
+          (.printStackTrace e (System/err)))))))
 
 (defn -init
-  [this]
-  (let [thread (Thread. (partial my-repl this))]
-    (.start thread)
-    (send (.state this) #(assoc % :repl-thread thread))))
+  "Initialize applet."
+  [applet]
+  (let [js-executor (Executors/newSingleThreadExecutor)
+        priv-executor (Executors/newSingleThreadExecutor)
+        random (SecureRandom.)]
+    (dosync
+      (alter (.state applet) conj
+        {:js-executor js-executor
+         :priv-executor priv-executor
+         :random random}))
+    ;; Prime the priv-executor
+    (.execute priv-executor
+      #(jscall applet "gnunetInit"))))
 
 (defn -ver
-  [this]
-  "0.12")
+  "Returns the version of this applet. Mainly for debugging."
+  [applet]
+  "0.22")
+
+(defn my-repl
+  [applet stdin stdout stderr]
+  (.setContextClassLoader (Thread/currentThread)
+    (.getClassLoader (.getClass applet)))
+  (declare *applet*)
+  (with-bindings {#'*in* stdin
+                  #'*out* stdout
+                  #'*err* stderr
+                  #'*ns* applet-ns
+                  #'*applet* applet}
+    (repl)))
+
+(defn -repl
+  "Creates a REPL thread which calls the javascript functions out and err.
+   Returns a PipedOutputStream for input to the REPL."
+  [applet out err]
+  (let [input (PipedOutputStream.)]
+    (.execute (:priv-executor @(.state applet))
+      (fn []
+        (let [stdin (LineNumberingPushbackReader.
+                      (InputStreamReader. (PipedInputStream. input)))
+              stdout (OutputStreamWriter.
+                       (proxy [java.io.ByteArrayOutputStream] []
+                         (flush []
+                           (jsobject-call applet out (str this))
+                           (.reset this))))
+              stderr (PrintWriter.
+                       (OutputStreamWriter.
+                         (proxy [java.io.ByteArrayOutputStream] []
+                           (flush []
+                             (jsobject-call applet err (str this))
+                             (.reset this))))
+                       true)
+              thread (Thread. (partial my-repl applet stdin stdout stderr))]
+          (.start thread))))
+    input))
 
 (defn -write
-  [this string]
-  (when-let [input (:input (deref (.state this)))]
-    (.write input (.getBytes string))))
+  "Write a string to the given stream."
+  [applet stream string]
+  (.write stream (.getBytes string)))
+
+(defn -generateKey
+  [applet f]
+  (.execute (:priv-executor @(.state applet))
+    (fn []
+      (let [keypair (generate-rsa-keypair! (:random @(.state applet)))
+            pkcs8 (.getEncoded (.getPrivate keypair))]
+        (jsobject-call applet f (base64-encode pkcs8))))))
+
+(defn -startPeer
+  [applet b64key f]
+  (.execute (:priv-executor @(.state applet))
+    (fn []
+      (let [pkcs8 (base64-decode b64key)
+            private-key (make-rsa-private-key pkcs8)
+            public-key (make-rsa-public-key (.getModulus private-key)
+                         (.getPublicExponent private-key))
+            peer (new-peer {:random (:random @(.state applet))
+                            :public-key public-key
+                            :private-key private-key})]
+        (.start (:selector-thread peer))
+        (jsobject-call applet f peer)))))
+
+(defn -configureTCP
+  [applet peer port]
+  ;; TODO: make TCP reconfigurable
+  (.execute (:priv-executor @(.state applet))
+    (fn []
+      (activate-tcp! peer port)
+      (configure-inet-addresses! peer "tcp" (get-local-addresses) port))))
+
+(defn transport-addresses-watcher
+  [applet peer f watched-agent old-state new-state]
+  )
+
+(defn remote-peers-watcher
+  [applet f watched-agent old-state new-state]
+  (try
+  (let [peers-added (apply dissoc new-state (keys old-state))
+        peers-removed (apply dissoc old-state (keys new-state))]
+    (doseq [peer (vals peers-added)]
+      (add-watch (:transport-addresses-agent peer) f
+        (partial transport-addresses-watcher applet peer)))
+    (jsobject-call applet f
+      (json-str
+        {"peersAdded" (map encode-ascii-hash (keys peers-added))
+         "peersRemoved" (map encode-ascii-hash (keys peers-removed))})))
+  (catch Exception e (.printStackTrace e (System/err)))))
+
+(defn -watchPeers
+  [applet peer f]
+  (.execute (:priv-executor @(.state applet))
+    (fn []
+      (add-watch (:remote-peers-agent peer) f
+        (partial remote-peers-watcher applet))
+      (doseq [remote-peer @(:remote-peers-agent peer)]
+        (add-watch (:transport-addresses-agent remote-peer) f
+          (partial transport-addresses-watcher applet remote-peer)))
+      (add-watch (:transport-addresses-agent peer) f
+        (partial transport-addresses-watcher applet peer)))))
+
+(defn -fetchHostlist
+  [applet peer url]
+  (.execute (:priv-executor @(.state applet))
+    (fn []
+      (download-hostlist! (partial admit-hello! peer) url))))

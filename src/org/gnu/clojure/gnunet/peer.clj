@@ -137,11 +137,11 @@
         disk-bound-executor (ThreadPoolExecutor. 0 1 60 TimeUnit/SECONDS
                               disk-bound-queue)]
     (struct-map peer-struct
-      :public-key-atom (atom (.getPublic (:keypair options)))
-      :id (generate-id (.getPublic (:keypair options)))
+      :public-key-atom (atom (:public-key options))
+      :id (generate-id (:public-key options))
       :transport-addresses-agent (agent {})
       :state-agent (agent {})
-      :private-key (.getPrivate (:keypair options))
+      :private-key (:private-key options)
       :remote-peers-agent (agent {})
       :transports-agent (agent {})
       :dispatch-agent (agent {})
