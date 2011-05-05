@@ -8,6 +8,7 @@
     (java.io InputStreamReader OutputStreamWriter
       PipedInputStream PipedOutputStream PrintWriter)
     java.security.SecureRandom
+    java.security.spec.InvalidKeySpecException
     java.util.concurrent.Executors
     netscape.javascript.JSObject)
   (:gen-class
@@ -23,7 +24,7 @@
              [write [java.io.PipedOutputStream String] Void]
              [generateKey [netscape.javascript.JSObject] Void]
              [startPeer [String netscape.javascript.JSObject] Void]
-             [configureTCP [clojure.lang.APersistentMap Integer] Void]
+             [configureTCP [clojure.lang.APersistentMap int] Void]
              [watchPeers [clojure.lang.APersistentMap
                           netscape.javascript.JSObject] Void]
              [fetchHostlist [clojure.lang.APersistentMap String] Void]]))
@@ -57,7 +58,7 @@
   (.execute (:js-executor @(.state applet))
     (fn []
       (try
-        (.call f "call" (object-array (cons nil args)))
+        (.call f "call" (object-array (cons applet args)))
         (catch Exception e
           (.printStackTrace e (System/err)))))))
 
@@ -135,15 +136,21 @@
   [applet b64key f]
   (.execute (:priv-executor @(.state applet))
     (fn []
-      (let [pkcs8 (base64-decode b64key)
-            private-key (make-rsa-private-key pkcs8)
-            public-key (make-rsa-public-key (.getModulus private-key)
-                         (.getPublicExponent private-key))
-            peer (new-peer {:random (:random @(.state applet))
-                            :public-key public-key
-                            :private-key private-key})]
-        (.start (:selector-thread peer))
-        (jsobject-call applet f peer)))))
+      (try
+        (let [pkcs8 (base64-decode b64key)
+              private-key (make-rsa-private-key pkcs8)
+              public-key (make-rsa-public-key (.getModulus private-key)
+                           (.getPublicExponent private-key))
+              peer (new-peer {:random (:random @(.state applet))
+                              :public-key public-key
+                              :private-key private-key})]
+          (.start (:selector-thread peer))
+          (jsobject-call applet f peer))
+        (catch InvalidKeySpecException e
+          (jsobject-call applet f "badkey"))
+        (catch Exception e
+          (.printStackTrace e (System/err))
+          (jsobject-call applet f nil))))))
 
 (defn -configureTCP
   [applet peer port]
@@ -155,21 +162,27 @@
 
 (defn transport-addresses-watcher
   [applet peer f watched-agent old-state new-state]
-  )
+  (when-not (= old-state new-state)
+    (jsobject-call applet f
+      (json-str
+        {"peerChanged"
+         [(encode-ascii-hash (:id peer))
+          (merge-transport-addresses {}
+            (for [address (list-transport-addresses new-state)]
+              (dissoc address :expiration :send-time :challenge)))]}))))
 
 (defn remote-peers-watcher
   [applet f watched-agent old-state new-state]
-  (try
   (let [peers-added (apply dissoc new-state (keys old-state))
         peers-removed (apply dissoc old-state (keys new-state))]
     (doseq [peer (vals peers-added)]
       (add-watch (:transport-addresses-agent peer) f
         (partial transport-addresses-watcher applet peer)))
-    (jsobject-call applet f
-      (json-str
-        {"peersAdded" (map encode-ascii-hash (keys peers-added))
-         "peersRemoved" (map encode-ascii-hash (keys peers-removed))})))
-  (catch Exception e (.printStackTrace e (System/err)))))
+    (when-not (and (empty? peers-added) (empty? peers-removed))
+      (jsobject-call applet f
+        (json-str
+          {"peersAdded" (map encode-ascii-hash (keys peers-added))
+           "peersRemoved" (map encode-ascii-hash (keys peers-removed))})))))
 
 (defn -watchPeers
   [applet peer f]
