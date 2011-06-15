@@ -8,7 +8,7 @@
 (defn encode-int
   "Convert an integer to a sequence of bytes in network order."
   [x]
-  (let [big (bigint x)
+  (let [big (biginteger x)
         len (max 1 (bit-count-to-bytes (.bitLength big)))
         a (.toByteArray big)]
     (drop (- (alength a) len) a)))
@@ -27,7 +27,7 @@
 (defn encode-int64
   "Convert a 64-bit integer to a sequence of bytes in network order."
   [x]
-  (concat (encode-int32 (bit-shift-right (bigint x) 32))
+  (concat (encode-int32 (bit-and (bit-shift-right x 32) 0xFFFFFFFF))
     (encode-int32 (bit-and x 0xFFFFFFFF))))
 
 (defn decode-int

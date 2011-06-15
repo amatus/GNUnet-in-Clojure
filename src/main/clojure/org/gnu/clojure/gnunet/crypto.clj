@@ -234,7 +234,7 @@
   "Generate a 2048 bit RSA keypair."
   [random]
   (let [rsa (KeyPairGenerator/getInstance "RSA")
-        spec (RSAKeyGenParameterSpec. 2048 (bigint 257))]
+        spec (RSAKeyGenParameterSpec. 2048 (biginteger 257))]
     (.initialize rsa spec random)
     (.generateKeyPair rsa)))
 
@@ -338,12 +338,12 @@
          -116 59 14 37 66 56 2]])))
   
 (defn fermat-compositeness-test
-  "Perform Fermat's Compositeness Test on the given bigint."
+  "Perform Fermat's Compositeness Test on the given BigInteger."
   [number]
-  (not (== 1 (.modPow (bigint 2) (dec number) number))))
+  (not (== 1 (.modPow (biginteger 2) (dec number) number))))
 
 (defn miller-rabin-compositeness-test
-  "Perform the Miller-Rabin Compositeness Test on the given bigint with the
+  "Perform the Miller-Rabin Compositeness Test on the given BigInteger with the
    given number of rounds. This version uses a witness of 2 for the first
    round."
   [n steps seed]
@@ -355,12 +355,13 @@
       (if (>= step steps)
         [false seed]
         (let [[x seed] (if (zero? step)
-                         [(bigint 2) seed]
+                         [(biginteger 2) seed]
                          (random-int (dec bit-length) seed))
               y (.modPow x q n)]
           (if (or (== 1 y) (== nminus1 y))
             (recur (inc step) seed)
-            (if (loop [g (next (take k (iterate #(.modPow % (bigint 2) n) y)))]
+            (if (loop [g (next
+                           (take k (iterate #(.modPow % (biginteger 2) n) y)))]
                   (cond
                     (nil? g) false
                     (== 1 (first g)) false
@@ -423,13 +424,13 @@
                                            [p q] (sort [p q])
                                            n (* p q)]
                                        [n p q seed])
-                             [(bigint 0) 0 0 seed])))
+                             [(biginteger 0) 0 0 seed])))
           t1 (dec p)
           t2 (dec q)
           phi (* t1 t2)
           g (.gcd t1 t2)
           f (quot phi g)
-          e (bigint (first (filter #(== 1 (.gcd phi (bigint %)))
+          e (biginteger (first (filter #(== 1 (.gcd phi (biginteger %)))
                              (iterate (partial + 2) 257))))]
       (let [private-key (try
                           (let [d (.modInverse e f)

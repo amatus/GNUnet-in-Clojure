@@ -1,5 +1,5 @@
 (ns org.gnu.clojure.gnunetapplet.applet
-  (:use (clojure.contrib json monads)
+  (:use clojure.contrib.json
     [clojure.main :only (repl)]
     (org.gnu.clojure.gnunet crypto hostlist inet peer tcp transport)
     org.gnu.clojure.gnunetapplet.base64)
@@ -86,7 +86,7 @@
   [applet stdin stdout stderr]
   (.setContextClassLoader (Thread/currentThread)
     (.getClassLoader (.getClass applet)))
-  (declare *applet*)
+  (declare ^:dynamic *applet*)
   (with-bindings {#'*in* stdin
                   #'*out* stdout
                   #'*err* stderr

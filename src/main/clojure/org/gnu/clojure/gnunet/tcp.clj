@@ -198,7 +198,7 @@
                     :send-queue send-queue
                     :remote-peer-id (:id remote-peer)
                     :received-bytes []})]
-              (do
+              (try
                 (.connect socket-channel address)
                 (.add send-queue
                   {:bytes (generate-welcome-message peer)
@@ -206,7 +206,12 @@
                 (update-selection-key-async! peer selection-key
                   SelectionKey/OP_CONNECT
                   (partial handle-socket-channel-selected! peer transport
-                    encoded-address)))))))
+                    encoded-address))
+                (catch Exception e
+                  (.add (:selector-continuations-queue peer)
+                    #(handle-disconnect! peer transport encoded-address
+                      selection-key))
+                  (.wakeup (:selector peer))))))))
       (.wakeup (:selector peer)))))
 
 (defn emit-messages-tcp!
