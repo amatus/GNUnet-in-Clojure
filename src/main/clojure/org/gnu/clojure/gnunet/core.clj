@@ -322,9 +322,10 @@
                   (assoc % :last-packets-bitmap (bit-set bitmap bit))
                   (conj %
                     {:last-sequence-number-received seqnum
-                     :last-packets-bitmap (.intValue
-                                            (bit-shift-left (biginteger bitmap)
-                                              (- seqnum last-seqnum)))})))
+                     :last-packets-bitmap (bit-and
+                                            (bit-shift-left bitmap
+                                              (- seqnum last-seqnum))
+                                            0xFFFFFFFF)})))
            :when-not (.before (:timestamp message) (message-expiration))
            ;; TODO: update bandwidth tracking
            ]
