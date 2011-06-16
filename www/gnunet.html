@@ -1,0 +1,35 @@
+<html>
+<head>
+<title>GNUnet Applet</title>
+<script type="text/javascript" src="http://www.java.com/js/deployJava.js">
+</script>
+<script type="text/javascript" src="js/jquery-1.5.js"></script>
+<script type="text/javascript" src="js/jquery-ui-1.8.9.custom.min.js"></script>
+<script type="text/javascript" src="js/jquery.mousewheel.js"></script>
+<script type="text/javascript" src="js/jquery.timers-1.2.js"></script>
+<script type="text/javascript" src="js/jquery.terminal-0.2.3.9.js"></script>
+<script type="text/javascript" src="js/gnunet.js"></script>
+<link type="text/css" href="css/smoothness/jquery-ui-1.8.9.custom.css"
+      rel="stylesheet" />
+<link type="text/css" href="css/jquery.terminal.css" rel="stylesheet" />
+</head>
+<body>
+
+<script>
+  var attributes = {code:'org.gnu.clojure.gnunetapplet.applet.class',
+      archive:'gnunet.jar,clojure.jar,types.jar,generic.jar,json.jar,monads.jar',
+      id:'gnunet',
+      width:1, height:1};
+  var parameters = {jnlp_href:'gnunet.jnlp'};
+  var version = '1.6';
+  deployJava.runApplet(attributes, parameters, version);
+</script>
+<div id="status">Loading applet...</div>
+<table id="peers">
+<thead class="ui-widget-header"><tr><td>Peer ID</td></tr></thead>
+<tbody class="ui-widget-content"></tbody>
+</table>
+<ul id="changes"><li class="ui-widget-header">Transport address changes</li>
+</ul>
+</body>
+</html>
