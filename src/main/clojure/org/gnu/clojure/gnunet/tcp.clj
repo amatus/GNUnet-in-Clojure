@@ -45,13 +45,16 @@
 (defn update-selection-key-async!
   ([peer selection-key ops]
     (.add (:selector-continuations-queue peer)
-      #(.interestOps selection-key ops))
+      #(try
+         (.interestOps selection-key ops)
+         (catch Exception e)))
     (.wakeup (:selector peer)))
   ([peer selection-key ops attachment]
     (.add (:selector-continuations-queue peer)
-      #(do
+      #(try
          (.interestOps selection-key ops)
-         (.attach selection-key attachment)))
+         (.attach selection-key attachment)
+         (catch Exception e)))
     (.wakeup (:selector peer))))
 
 (defn admit-tcp-message!
