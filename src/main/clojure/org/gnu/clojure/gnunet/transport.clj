@@ -327,7 +327,7 @@
       signature-purpose-pong-using (handle-pong-using! peer remote-peer pong)
       nil)))
 
-(defn emit-continuation!
+(defn emit-callback!
   [peer transport remote-peer encoded-address result]
   (when result
     (let [addresses ((deref (:transport-addresses-agent remote-peer))

@@ -26,3 +26,5 @@
 (defn available-processors
   []
   (.availableProcessors (Runtime/getRuntime)))
+
+(defn skip [& _])

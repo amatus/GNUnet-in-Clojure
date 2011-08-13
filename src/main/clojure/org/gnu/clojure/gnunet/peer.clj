@@ -65,11 +65,11 @@
     ;; Thread which selects on :selector
     :selector-thread
     
-    ;; java.util.concurrent.ConcurrentLinkedQueue of continuations.
+    ;; java.util.concurrent.ConcurrentLinkedQueue of callbacks.
     ;; In order to access the selector while the selector-thread is running add
-    ;; a continuation to this queue and call .wakeup on the selector.
+    ;; a callback to this queue and call .wakeup on the selector.
     ;; The size of this queue is an easy measure our network load.
-    :selector-continuations-queue
+    :selector-callbacks-queue
     
     ;; java.security.SecureRandom
     :random
@@ -117,19 +117,19 @@
       (== (:priority (meta this)) (:priority (meta obj))))))
 
 (defn selector-loop!
-  [selector continuations]
-  (doseq [continuation (queue-seq! continuations)]
-    (continuation))
+  [selector callbacks]
+  (doseq [callback (queue-seq! callbacks)]
+    (callback))
   (.select selector)
   (let [selected-keys (.selectedKeys selector)]
     (doseq [selection-key selected-keys]
       ((.attachment selection-key) selection-key))
     (.clear selected-keys))
-  (recur selector continuations))
+  (recur selector callbacks))
 
 (defn new-peer [options]
   (let [selector (Selector/open)
-        continuations (ConcurrentLinkedQueue.)
+        callbacks (ConcurrentLinkedQueue.)
         cpu-bound-queue (LinkedBlockingQueue.)
         cpu-bound-executor (ThreadPoolExecutor. 0 (available-processors) 60
                              TimeUnit/SECONDS cpu-bound-queue)
@@ -146,8 +146,8 @@
       :transports-agent (agent {})
       :dispatch-agent (agent {})
       :selector selector
-      :selector-thread (Thread. (partial selector-loop! selector continuations))
-      :selector-continuations-queue continuations
+      :selector-thread (Thread. (partial selector-loop! selector callbacks))
+      :selector-callbacks-queue callbacks
       :random (:random options)
       :cpu-bound-executor cpu-bound-executor
       :cpu-bound-queue cpu-bound-queue
@@ -159,7 +159,7 @@
 (defn network-load
   [peer]
   ;; TODO: figure out if we really need size, it's an O(n) operation
-  (.size (:selector-continuations-queue peer)))
+  (.size (:selector-callbacks-queue peer)))
 
 (defn cpu-load
   [peer]
