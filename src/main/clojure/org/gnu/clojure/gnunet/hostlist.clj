@@ -1,5 +1,5 @@
 (ns org.gnu.clojure.gnunet.hostlist
-  (:use (org.gnu.clojure.gnunet parser message hello iostream peer transport))
+  (:use (org.gnu.clojure.gnunet parser message iostream peer transport))
   (:import java.util.TimerTask))
 
 (def parse-hostlist

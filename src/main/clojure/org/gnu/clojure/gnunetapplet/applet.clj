@@ -169,7 +169,7 @@
          [(encode-ascii-hash (:id peer))
           (merge-transport-addresses {}
             (for [address (list-transport-addresses new-state)]
-              (dissoc address :expiration :send-time :challenge)))]}))))
+              (dissoc address :send-time :challenge)))]}))))
 
 (defn remote-peers-watcher
   [applet f watched-agent old-state new-state]

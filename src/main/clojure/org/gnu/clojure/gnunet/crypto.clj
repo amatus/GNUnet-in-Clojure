@@ -138,15 +138,14 @@
 
 (defn encode-aes-key
   [aes-key]
-  (concat
-    (.getEncoded aes-key)
-    (encode-int32 (crc32 (.getEncoded aes-key)))))
+  (let [encoded-key (.getEncoded aes-key)]
+    (concat encoded-key (encode-int32 (crc32 encoded-key)))))
 
 (def parse-aes-key
-  (domonad parser-m [aes-key (items aes-key-size)
+  (domonad parser-m [encoded-key (items aes-key-size)
                      checksum parse-uint32
-                     :when (= checksum (crc32 aes-key))]
-    (make-aes-key aes-key)))
+                     :when (= checksum (crc32 encoded-key))]
+    (make-aes-key encoded-key)))
 
 (defn generate-aes-key!
   [random]
@@ -410,7 +409,7 @@
 
 (with-test
 (defn generate-kblock-key
-  "Generates an RSA private key of a given bit-length."
+  "Generates an RSA private key of a given bit-length given a seed value."
   [bit-length seed]
   {:pre [(even? bit-length)]}
   (loop [seed seed]

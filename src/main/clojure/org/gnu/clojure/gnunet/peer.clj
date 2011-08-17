@@ -10,7 +10,7 @@
   ;; atom of java.security.PublicKey
   :public-key-atom
   
-  ;; 64 byte (512-bit) vector
+  ;; vector of 64 bytes (512 bits)
   :id
   
   ;; agent of a map associating transport names (String) to maps associating
@@ -98,9 +98,6 @@
     
     ;; java.util.concurrent.ScheduledThreadPoolExecutor
     :scheduled-executor))))
-
-(defstruct peer-options
-  :keypair)
 
 (defn generate-id
   "Generate the SHA-512 digest of the encoded public key."

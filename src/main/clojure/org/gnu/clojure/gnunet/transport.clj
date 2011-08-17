@@ -1,6 +1,6 @@
 (ns org.gnu.clojure.gnunet.transport
-  (:use (org.gnu.clojure.gnunet core crypto exception hello message metrics
-          parser peer util)
+  (:use (org.gnu.clojure.gnunet core crypto exception message metrics parser
+                                peer util)
     clojure.contrib.monads)
   (:import (java.util Date Calendar)))
 
@@ -16,20 +16,56 @@
   []
   (.getTime (doto (Calendar/getInstance) (.add Calendar/MINUTE 5))))
 
-(def message-type-ping 32)
-(def message-type-pong 33)
+(def message-type-hello 16)
+(def message-type-transport-ping 32)
+(def message-type-transport-pong 33)
+(def message-type-transport-connect 35)
+(def message-type-transport-disconnect 36)
+(def message-type-transport-keepalive 39)
 
 (def signature-purpose-pong-own 1)
-(def signature-purpose-pong-using 2)
+
+(defn encode-transport-address
+  [address]
+  (concat
+    (encode-utf8 (:transport address))
+    (encode-int16 (count (:encoded-address address)))
+    (encode-date (:expiration address))
+    (:encoded-address address)))
+
+(def parse-transport-address
+  (domonad parser-m [transport parse-utf8
+                     address-length parse-uint16
+                     expiration parse-date
+                     encoded-address (items address-length)]
+    {:transport transport
+     :expiration expiration
+     :encoded-address encoded-address}))
+
+(defn encode-hello
+  "Encode a hello message."
+  [hello]
+  (concat
+    (encode-int32 0)
+    (encode-rsa-public-key (:public-key hello))
+    (mapcat encode-transport-address (:transport-addresses hello))))
+
+(def parse-hello
+  (domonad parser-m [padding parse-uint32
+                     :when (== padding 0)
+                     public-key parse-rsa-public-key
+                     addresses (none-or-more parse-transport-address)]
+    {:public-key public-key
+     :transport-addresses addresses}))
 
 (defn encode-ping
   [ping]
   (concat
     (encode-int32 (:challenge ping))
     (:peer-id ping)
-    (if-let [transport (:transport ping)]
+    (when-let [transport (:transport ping)]
       (concat
-        (encode-utf8 (:transport ping))
+        (encode-utf8 transport)
         (:encoded-address ping)))))
 
 (def parse-ping
@@ -81,8 +117,7 @@
                  :transport (String. (byte-array transport) "UTF-8")
                  :encoded-address encoded-address}))
      :let [signature-purpose (:purpose signed)]
-     :when (or (== signature-purpose signature-purpose-pong-own)
-             (== signature-purpose signature-purpose-pong-using))
+     :when (== signature-purpose signature-purpose-pong-own)
      residue (optional item)
      :when (nil? residue)]
     (conj {:challenge challenge
@@ -92,7 +127,7 @@
       (:parsed signed))))
 
 (defn list-transport-addresses
-  "Generate a list of transport descriptions."
+  "Generate a list of transport addresses."
   [addresses-map]
   (for [transport addresses-map
         address (val transport)]
@@ -106,23 +141,17 @@
   (conj a b {:expiration (my-max (:expiration a) (:expiration b))}))
 
 (defn merge-transport-addresses
-  "Merge a list of transport descriptions into a transports-agent map. The input
-   list is generated from parse-hello or list-transports. The input map is
+  "Merge a list of transport addresses into a transports-agent map. The input
+   list is generated from parse-hello or list-transport-addresses. The map is
    described in peer.clj."
   [address-map address-list]
-  (reduce (fn [address-map new-address]
-            (if-let [transport (address-map (:transport new-address))]
-              (if-let [address-info (transport (:encoded-address new-address))]
-                (assoc address-map (:transport new-address)
-                  (assoc transport (:encoded-address new-address)
-                    (merge-address-info address-info
-                      (dissoc new-address :transport :encoded-address))))
-                (assoc address-map (:transport new-address)
-                  (assoc transport (:encoded-address new-address)
-                    (dissoc new-address :transport :encoded-address))))
-              (assoc address-map (:transport new-address)
-                {(:encoded-address new-address)
-                 (dissoc new-address :transport :encoded-address)})))
+  (reduce
+    (fn [address-map new-address]
+      (assoc-deep
+        address-map
+        (dissoc new-address :transport :encoded-address)
+        (:transport new-address)
+        (:encoded-address new-address)))
     address-map
     address-list))
 
@@ -141,7 +170,7 @@
 
 (defn ping-message
   [remote-peer address challenge]
-  {:message-type message-type-ping
+  {:message-type message-type-transport-ping
    :bytes (encode-ping {:challenge challenge
                         :peer-id (:id remote-peer)
                         :transport (:transport address)
@@ -155,65 +184,30 @@
 
 (defn update-remote-peers!
   [remote-peers peer-id hello]
-  (let [remote-peer (remote-peers peer-id)]
-    (if remote-peer
-      (do
-        (if (:public-key hello)
-          (swap! (:public-key-atom remote-peer)
-            #(if (nil? %) (:public-key hello))))
-        (send (:transport-addresses-agent remote-peer)
-          update-transport-addresses
-          (:transport-addresses hello))
-        remote-peers)
-      (assoc remote-peers peer-id
-        (struct-map remote-peer-struct
-          :public-key-atom (atom (:public-key hello))
-          :id peer-id
-          :transport-addresses-agent (agent
-                                       (merge-transport-addresses {}
-                                         (:transport-addresses hello)))
-          :state-agent (agent {:is-connected false}))))))
-
-(defn verify-transport-address!
-  [peer remote-peer address]
-  (second
-    ((domonad exception-m
-       [address (fetch-state)
-        :when (not (or (contains? address :latency)
-                     (contains? address :send-time)))
-        :when-let [transport ((deref (:transports-agent peer))
-                               (:transport address))]
-        :let [challenge (.nextInt (:random peer))]
-        _ (set-state
-            (conj address
-              {:send-time (Date.)    ;; TODO: Now is not the actual send time.
-               :challenge challenge}))]
-       ((:emit-messages! transport) transport remote-peer
-         (:encoded-address address) nil
-         [(hello-for-peer-message peer)
-          (ping-message remote-peer address challenge)])) address)))
-
-(defn verify-transport-addresses!
-  [addresses peer remote-peer]
-  (merge-transport-addresses {}
-    (map (partial verify-transport-address! peer remote-peer)
-      (list-transport-addresses addresses))))
-
-(defn verify-remote-peers!
-  [remote-peers peer]
-  (doseq [[_ remote-peer] remote-peers]
-    (send (:transport-addresses-agent remote-peer)
-      verify-transport-addresses! peer remote-peer))
-  remote-peers)
+  (if-let [remote-peer (remote-peers peer-id)]
+    (do
+      (if (:public-key hello)
+        (swap! (:public-key-atom remote-peer)
+          #(if (nil? %) (:public-key hello))))
+      (send (:transport-addresses-agent remote-peer)
+        update-transport-addresses
+        (:transport-addresses hello))
+      remote-peers)
+    (assoc remote-peers peer-id
+      (struct-map remote-peer-struct
+        :public-key-atom (atom (:public-key hello))
+        :id peer-id
+        :transport-addresses-agent (agent
+                                     (merge-transport-addresses {}
+                                       (:transport-addresses hello)))
+        :state-agent (agent {:is-connected false})))))
 
 (defn admit-hello!
   "Updates peer:remote-peers-agent with new information contained in hello."
   [peer hello]
   (let [peer-id (generate-id (:public-key hello))]
-    (if (not (= peer-id (:id peer)))
-      (let [remote-peers-agent (:remote-peers-agent peer)]
-        (send remote-peers-agent update-remote-peers! peer-id hello)
-        (send remote-peers-agent verify-remote-peers! peer)))))
+    (when-not (= peer-id (:id peer))
+      (send (:remote-peers-agent peer) update-remote-peers! peer-id hello))))
 
 (defn handle-hello!
   [peer message]
@@ -244,56 +238,29 @@
         (if (:is-connected state)
           (let [transport (:connected-transport state)
                 encoded-address (:connected-address state)]
-            ((:emit-messages! transport) transport remote-peer encoded-address
-              nil [{:message-type message-type-pong :bytes encoded-pong}]))
+            ((:emit-messages! transport)
+               transport remote-peer encoded-address nil
+               [{:message-type message-type-transport-pong
+                 :bytes encoded-pong}]))
           (doseq [transports (deref (:transport-addresses-agent remote-peer))
                   address (val transports)]
             (when-let [transport ((deref (:transports-agent peer))
                                    (key transports))]
-              ((:emit-messages! transport) transport remote-peer (key address)
-                nil
-                [{:message-type message-type-pong :bytes encoded-pong}]))))))))
-
-(defn send-pong-using!
-  [peer remote-peer address ping]
-  (.execute (:cpu-bound-executor peer)
-    (fn []
-      (let
-        [state (deref (:state-agent remote-peer))
-         pong {:challenge (:challenge ping)
-               :signature-purpose signature-purpose-pong-using
-               :expiration (pong-expiration)
-               :peer-id (:id remote-peer)
-               :transport (:transport address)
-               :encoded-address (:encoded-address address)}
-         signed-material (encode-pong-signed-material pong)
-         signature (rsa-sign (:private-key peer) signed-material)
-         pong (assoc pong :signature signature)
-         encoded-pong (encode-pong pong signed-material)
-         state (deref (:state-agent remote-peer))]
-        (if (:is-connected state)
-          (let [transport (:connected-transport state)
-                encoded-address (:connected-address state)]
-            ((:emit-messages! transport) transport remote-peer encoded-address
-              nil [{:message-type message-type-pong :bytes encoded-pong}]))
-          (doseq [transports (deref (:transport-addresses-agent remote-peer))
-                  address (val transports)]
-            (when-let [transport ((deref (:transports-agent peer))
-                                   (key transports))]
-              ((:emit-messages! transport) transport remote-peer (key address)
-                nil
-                [{:message-type message-type-pong :bytes encoded-pong}]))))))))
+              ((:emit-messages! transport)
+                 transport remote-peer (key address) nil
+                [{:message-type message-type-transport-pong
+                  :bytes encoded-pong}]))))))))
 
 (defn handle-ping!
   [peer remote-peer address message]
   (when-let [ping (first (parse-ping (:bytes message)))]
     (cond
       (not (= (:peer-id ping) (:id peer))) nil
-      (:transport ping) (send-pong-own! peer remote-peer ping)
-      :else (send-pong-using! peer remote-peer address ping))))
+      (:transport ping) (send-pong-own! peer remote-peer ping))))
 
 (defn handle-pong-own!
   [peer remote-peer pong]
+  ;; TODO - test that the challenge matches before wasting time with RSA
   (.execute (:cpu-bound-executor peer)
     (fn []
       (domonad maybe-m
@@ -311,11 +278,6 @@
                              (.getTime (:send-time address)))}))]
           (metric-add! peer "Peer addresses considered valid" 1))))))
 
-(defn handle-pong-using!
-  [peer remote-peer pong]
-  ;; TODO - fill in this case
-  (.write *out* "We don't handle PONG_USING yet!\n"))
-  
 (defn handle-pong!
   [peer message]
   (domonad maybe-m
@@ -324,7 +286,6 @@
      remote-peer ((deref (:remote-peers-agent peer)) (:peer-id pong))]
     (condp == (:signature-purpose pong)
       signature-purpose-pong-own (handle-pong-own! peer remote-peer pong)
-      signature-purpose-pong-using (handle-pong-using! peer remote-peer pong)
       nil)))
 
 (defn emit-callback!
@@ -350,7 +311,8 @@
             remote-peer (remote-peers sender-id)]
         (condp = (:message-type message)
           message-type-hello (handle-hello! peer message)
-          message-type-ping (handle-ping! peer remote-peer address message)
-          message-type-pong (handle-pong! peer message)
+          message-type-transport-ping (handle-ping!
+                                        peer remote-peer address message)
+          message-type-transport-pong (handle-pong! peer message)
           (handle-receive! peer remote-peer message))
         remote-peers))))

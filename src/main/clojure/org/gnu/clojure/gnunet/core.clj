@@ -54,31 +54,29 @@
        :signature signature}
       (:parsed signed))))
 
+(def iv-context (encode-utf8 "initialization vector"))
 (defn derive-iv
   [aes-key seed peer-id]
-  (derive-aes-iv aes-key
-    (encode-int32 seed)
-    (concat
-      peer-id
-      (encode-utf8 "initialization vector"))))
+  (derive-aes-iv aes-key (encode-int32 seed) (concat peer-id iv-context)))
 
+(def pong-iv-context (encode-utf8 "pong initialization vector"))
 (defn derive-pong-iv
   [aes-key seed challenge peer-id]
-  (derive-aes-iv aes-key
+  (derive-aes-iv
+    aes-key
     (encode-int32 seed)
-    (concat
-      peer-id
-      (encode-int32 challenge)
-      (encode-utf8 "pong initialization vector"))))
+    (concat peer-id (encode-int32 challenge) pong-iv-context)))
 
+(def auth-key-context (encode-utf8 "authentication key"))
 (defn derive-auth-key
   [aes-key seed aes-key-created]
-  (derive-hmac-key aes-key
+  (derive-hmac-key
+    aes-key
     (encode-int32 seed)
     (concat
       (.getEncoded aes-key)
       (encode-date aes-key-created)
-      (encode-utf8 "authentication key"))))
+      auth-key-context)))
 
 (defn encode-core-ping
   [ping aes-key iv-seed remote-peer-id]
