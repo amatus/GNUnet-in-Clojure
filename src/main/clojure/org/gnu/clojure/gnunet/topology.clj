@@ -1,5 +1,7 @@
 (ns org.gnu.clojure.gnunet.topology
-  (:use (org.gnu.clojure.gnunet peer transport)))
+  (:use clojure.contrib.monads
+        (org.gnu.clojure.gnunet exception peer transport util))
+  (:import java.util.Date))
 
 (defn verify-transport-address!
   [peer remote-peer address]
@@ -33,6 +35,14 @@
       verify-transport-addresses! peer remote-peer))
   remote-peers)
 
+(defn new-peer-callback!
+  [peer remote-peer]
+  )
+
 (defn activate-topology!
   [peer]
-  )
+  (send
+    (:topology-agent peer)
+    conj-vals
+    #{}
+    [:new-peer-callbacks new-peer-callback!]))

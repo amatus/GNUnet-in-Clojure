@@ -206,14 +206,8 @@
 
 (defn activate-filesharing!
   [peer]
-  (send (:dispatch-agent peer)
-    (fn [dispatchers]
-      (let [get-dispatchers (dispatchers message-type-fs-get #{})
-            put-dispatchers (dispatchers message-type-fs-put #{})
-            migration-stop-dispatchers
-            (dispatchers message-type-fs-migration-stop #{})]
-        (conj dispatchers
-          {message-type-fs-get (conj get-dispatchers admit-get!)
-           message-type-fs-put (conj put-dispatchers admit-put!)
-           message-type-fs-migration-stop (conj migration-stop-dispatchers
-                                            admit-migration-stop!)})))))
+  (core-register-dispatchers!
+    peer
+    [message-type-fs-get admit-get!
+     message-type-fs-put admit-put!
+     message-type-migration-stop admit-migration-stop!]))

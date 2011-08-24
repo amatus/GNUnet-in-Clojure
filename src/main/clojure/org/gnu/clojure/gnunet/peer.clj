@@ -56,6 +56,14 @@
     ;; agent of a map of transport names (String) to maps of {:emit-message!}
     :transports-agent
     
+    ;; {
+    ;;  :new-peer-callbacks
+    ;;  :peer-changed-callbacks
+    ;;  :new-address-callbacks
+    ;;  :address-changed-callbacks
+    ;; }
+    :topology-agent
+
     ;; agent of a map of message types to sets of dispatch handlers
     :dispatch-agent
     
@@ -141,6 +149,7 @@
       :private-key (:private-key options)
       :remote-peers-agent (agent {})
       :transports-agent (agent {})
+      :topology-agent (agent {})
       :dispatch-agent (agent {})
       :selector selector
       :selector-thread (Thread. (partial selector-loop! selector callbacks))

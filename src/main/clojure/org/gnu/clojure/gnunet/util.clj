@@ -36,7 +36,17 @@
 
 (defn assoc-deep
   "Associates val with the 'path' of keys in a nested map."
-  [map val key & keys]
-  (if (nil? keys)
-    (assoc map key val)
-    (assoc map key (apply assoc-deep (map key) val keys))))
+  [_map _val _key & _keys]
+  (if (nil? _keys)
+    (assoc _map _key _val)
+    (assoc _map _key (apply assoc-deep (_map _key) _val _keys))))
+
+(defn conj-vals
+  [_map zero kvs]
+  (reduce 
+    (fn [_map kv]
+      (let [_key (first kv)
+            old-val (_map _key zero)]
+        (assoc _map _key 
+               (conj old-val (second kv)))))
+        _map (partition 2 kvs)))

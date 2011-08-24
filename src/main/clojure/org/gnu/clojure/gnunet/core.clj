@@ -1,5 +1,5 @@
 (ns org.gnu.clojure.gnunet.core
-  (:use (org.gnu.clojure.gnunet crypto exception message parser peer)
+  (:use (org.gnu.clojure.gnunet crypto exception message parser peer util)
     clojure.contrib.monads)
   (:import (java.util Date Calendar)))
 
@@ -381,3 +381,8 @@
           (emit-messages! peer remote-peer
             [{:messsage-type message-type-core-encrypted-message
               :bytes encoded-message}]))))))
+
+(defn core-register-dispatchers!
+  [peer new-dispatchers]
+  (send (:dispatch-agent peer)
+    conj-vals #{} new-dispatchers))

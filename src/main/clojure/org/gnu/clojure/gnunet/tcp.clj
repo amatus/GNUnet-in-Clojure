@@ -35,7 +35,8 @@
      _ (set-val nil (disj pending-connections connection))
      :when-let [remote-peer-id (deref (:remote-peer-id-atom connection))]
      remote-peer-connections (fetch-val remote-peer-id)
-     _ (set-val remote-peer-id (disj remote-peer-connections connection))]))
+     _ (set-val remote-peer-id (disj remote-peer-connections connection))]
+    nil))
 
 (defn update-selection-key!
   [selection-key ops & attachment]
@@ -70,16 +71,17 @@
         (update-selection-key!
           (:selection-key connection)
           (bit-or SelectionKey/OP_READ SelectionKey/OP_WRITE))
-        (send-do-exception-m
+        (send-do-exception-m!
           (:connections-agent transport)
           [pending-connections (fetch-val nil)
            _ (set-val nil (disj pending-connections connection))
            remote-peer-connections (fetch-val remote-peer-id (hash-set))
            _ (set-val remote-peer-id (conj remote-peer-connections
-                                           connection))])))
+                                           connection))]
+          nil)))
     (when-let [remote-peer-id (deref (:remote-peer-id-atom connection))]
       (let [address {:transport "tcp"
-                     :encoded-address encoded-address
+                     :encoded-address (:encoded-address connection)
                      :expiration (idle-connection-timeout)}]
         (admit-message! peer remote-peer-id address message)))))
 
@@ -128,7 +130,7 @@
                     (.poll ((deref (:sessions-agent transport)) remote-peer-id))
                     packet)]
        (if (nil? packet)
-         (.interestOps selection-key SelectionKey/OP_READ)
+         (.interestOps (:selection-key connection) SelectionKey/OP_READ)
          (try
            (.write (:socket-channel connection)
                    (ByteBuffer/wrap (byte-array (:bytes packet))))
@@ -140,15 +142,16 @@
 (defn handle-socket-channel-selected!
   [peer transport connection]
   ;; This is always called from inside the selector thread
-  (try
-    (if (.isConnectable selection-key)
-      (handle-socket-channel-connectable! peer transport connection))
-    (if (.isReadable selection-key)
-      (handle-socket-channel-readable! peer transport connection))
-    (if (.isWritable selection-key)
-      (handle-socket-channel-writable! peer transport connection))
-    (catch Exception e
-      (handle-disconnect! peer transport connection))))
+  (let [selection-key (:selection-key connection)]
+    (try
+      (when (.isConnectable selection-key)
+        (handle-socket-channel-connectable! peer transport connection))
+      (when (.isReadable selection-key)
+        (handle-socket-channel-readable! peer transport connection))
+      (when (.isWritable selection-key)
+        (handle-socket-channel-writable! peer transport connection))
+      (catch Exception e
+        (handle-disconnect! peer transport connection)))))
 
 (defn connect!
   [peer transport remote-peer encoded-address]
@@ -166,7 +169,6 @@
                           :send-queue send-queue
                           :received-bytes-atom (atom nil)
                           :remote-peer-id-atom (atom remote-peer-id)}]
-          (enqueue-welcome-message! peer connection)
           (.add send-queue
                 {:bytes (generate-welcome-message peer)
                  :callback! skip})
@@ -178,11 +180,11 @@
             (.connect socket-channel address)
             (catch Exception e
               (handle-disconnect! peer transport connection)))
-          (send-do-exception-m!
+          (send
             (:connections-agent transport)
-            [remote-peer-connections (fetch-val remote-peer-id (hash-set))
-             _ (set-val remote-peer-id
-                        (conj remote-peer-connections connection))]))))
+            conj-vals
+            (hash-set)
+            [remote-peer-id connection]))))
     (.wakeup (:selector peer))))
 
 (defn set-write-interest-or-connect!
@@ -245,9 +247,11 @@
         selection-key
         SelectionKey/OP_READ
         (partial handle-socket-channel-selected! peer transport connection))
-      (send-do-exception-m! (:connections-agent transport)
-        [pending-connections (fetch-val nil (hash-set))
-         _ (set-val nil (conj pending-connections connection))]))
+      (send
+        (:connections-agent transport)
+        conj-vals
+        (hash-set)
+        [nil connection]))
     (catch Exception e nil)))
 
 (defn register-server-channel!

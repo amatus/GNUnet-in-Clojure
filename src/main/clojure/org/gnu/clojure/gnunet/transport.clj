@@ -1,6 +1,6 @@
 (ns org.gnu.clojure.gnunet.transport
   (:use (org.gnu.clojure.gnunet core crypto exception message metrics parser
-                                peer util)
+                                peer topology_events util)
     clojure.contrib.monads)
   (:import (java.util Date Calendar)))
 
@@ -183,7 +183,7 @@
       (concat (list-transport-addresses addresses) new-addresses))))
 
 (defn update-remote-peers!
-  [remote-peers peer-id hello]
+  [remote-peers peer peer-id hello]
   (if-let [remote-peer (remote-peers peer-id)]
     (do
       (if (:public-key hello)
@@ -193,21 +193,26 @@
         update-transport-addresses
         (:transport-addresses hello))
       remote-peers)
-    (assoc remote-peers peer-id
-      (struct-map remote-peer-struct
-        :public-key-atom (atom (:public-key hello))
-        :id peer-id
-        :transport-addresses-agent (agent
-                                     (merge-transport-addresses {}
-                                       (:transport-addresses hello)))
-        :state-agent (agent {:is-connected false})))))
+    (let
+      [remote-peer
+       (struct-map
+         remote-peer-struct
+         :public-key-atom (atom (:public-key hello))
+         :id peer-id
+         :transport-addresses-agent (agent
+                                      (merge-transport-addresses
+                                        {} (:transport-addresses hello)))
+         :state-agent (agent {:is-connected false}))]
+      (notify-new-remote-peer! peer remote-peer)
+      (assoc remote-peers peer-id remote-peer))))
 
 (defn admit-hello!
   "Updates peer:remote-peers-agent with new information contained in hello."
   [peer hello]
   (let [peer-id (generate-id (:public-key hello))]
     (when-not (= peer-id (:id peer))
-      (send (:remote-peers-agent peer) update-remote-peers! peer-id hello))))
+      (send (:remote-peers-agent peer)
+            update-remote-peers! peer peer-id hello))))
 
 (defn handle-hello!
   [peer message]

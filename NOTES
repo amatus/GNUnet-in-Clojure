@@ -1,4 +1,4 @@
-(use '(org.gnu.clojure.gnunet bloomfilter core crypto exception filesharing hostlist inet iostream message parser peer tcp topology transport util))
+(use '(org.gnu.clojure.gnunet bloomfilter core crypto exception filesharing hostlist inet iostream message parser peer tcp topology topology_event transport util))
 (def random (java.security.SecureRandom.))
 (def keypair (generate-rsa-keypair! random))
 (def my-peer (new-peer {:public-key (.getPublic keypair) :private-key (.getPrivate keypair) :random random}))
