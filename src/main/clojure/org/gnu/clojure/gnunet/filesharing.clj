@@ -210,4 +210,4 @@
     peer
     [message-type-fs-get admit-get!
      message-type-fs-put admit-put!
-     message-type-migration-stop admit-migration-stop!]))
+     message-type-fs-migration-stop admit-migration-stop!]))

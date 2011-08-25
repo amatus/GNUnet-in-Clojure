@@ -80,10 +80,7 @@
                                            connection))]
           nil)))
     (when-let [remote-peer-id (deref (:remote-peer-id-atom connection))]
-      (let [address {:transport "tcp"
-                     :encoded-address (:encoded-address connection)
-                     :expiration (idle-connection-timeout)}]
-        (admit-message! peer remote-peer-id address message)))))
+      (admit-message! peer remote-peer-id message))))
 
 (defn handle-socket-channel-connectable!
   [peer transport connection]

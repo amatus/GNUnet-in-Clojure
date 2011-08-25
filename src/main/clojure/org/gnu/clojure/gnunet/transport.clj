@@ -257,7 +257,7 @@
                   :bytes encoded-pong}]))))))))
 
 (defn handle-ping!
-  [peer remote-peer address message]
+  [peer remote-peer message]
   (when-let [ping (first (parse-ping (:bytes message)))]
     (cond
       (not (= (:peer-id ping) (:id peer))) nil
@@ -307,17 +307,15 @@
                          :connected-address encoded-address})))))))
 
 (defn admit-message!
-  [peer sender-id address message]
+  [peer sender-id message]
   ;; (.write *out* (str "Received " message "\n"))
   (send (:remote-peers-agent peer)
     (fn [remote-peers]
-      (let [remote-peers (update-remote-peers! remote-peers
-                           sender-id {:transport-addresses [address]})
+      (let [remote-peers (update-remote-peers! remote-peers sender-id {})
             remote-peer (remote-peers sender-id)]
         (condp = (:message-type message)
           message-type-hello (handle-hello! peer message)
-          message-type-transport-ping (handle-ping!
-                                        peer remote-peer address message)
+          message-type-transport-ping (handle-ping! peer remote-peer message)
           message-type-transport-pong (handle-pong! peer message)
           (handle-receive! peer remote-peer message))
         remote-peers))))

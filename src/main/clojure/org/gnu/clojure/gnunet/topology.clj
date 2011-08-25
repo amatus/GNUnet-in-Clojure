@@ -28,16 +28,12 @@
     (map (partial verify-transport-address! peer remote-peer)
       (list-transport-addresses addresses))))
 
-(defn verify-remote-peers!
-  [remote-peers peer]
-  (doseq [[_ remote-peer] remote-peers]
-    (send (:transport-addresses-agent remote-peer)
-      verify-transport-addresses! peer remote-peer))
-  remote-peers)
-
 (defn new-peer-callback!
   [peer remote-peer]
-  )
+  ;; XXX: We need to check some kind of current connection count vs target
+  ;; connection count before doing this.
+  (send (:transport-addresses-agent remote-peer)
+    verify-transport-addresses! peer remote-peer))
 
 (defn activate-topology!
   [peer]
