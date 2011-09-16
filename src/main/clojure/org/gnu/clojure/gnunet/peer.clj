@@ -128,7 +128,7 @@
   (.select selector)
   (let [selected-keys (.selectedKeys selector)]
     (doseq [selection-key selected-keys]
-      ((.attachment selection-key) selection-key))
+      ((.attachment selection-key)))
     (.clear selected-keys))
   (recur selector callbacks))
 
