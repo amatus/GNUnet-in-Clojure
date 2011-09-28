@@ -7,7 +7,7 @@
     java.nio.ByteBuffer
     java.util.concurrent.ConcurrentLinkedQueue))
 
-(def message-type-tcp-welcome 60)
+(def message-type-tcp-welcome 61)
 
 (defn encode-welcome
   [peer]
@@ -239,7 +239,7 @@
                       :send-queue (ConcurrentLinkedQueue.)
                       :received-bytes-atom (atom nil)
                       :remote-peer-id-atom (atom nil)
-                      :incoming true}]
+                      :incoming true}] ;; :incoming not used?
       (update-selection-key!
         selection-key
         SelectionKey/OP_READ

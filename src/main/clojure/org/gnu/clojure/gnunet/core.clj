@@ -3,10 +3,10 @@
     clojure.contrib.monads)
   (:import (java.util Date Calendar)))
 
-(def message-type-core-set-key 80)
-(def message-type-core-encrypted-message 81)
-(def message-type-core-ping 82)
-(def message-type-core-pong 83)
+(def message-type-core-set-key 81)
+(def message-type-core-encrypted-message 82)
+(def message-type-core-ping 83)
+(def message-type-core-pong 84)
 
 (def signature-purpose-set-key 3)
 

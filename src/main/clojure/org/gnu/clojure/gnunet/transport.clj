@@ -126,6 +126,19 @@
            :signed-material (:signed-material signed)}
       (:parsed signed))))
 
+(defn encode-connect
+  [connect]
+  (concat
+    (encode-int32 0)
+    (encode-date (:timestamp connect))))
+
+(def parse-connect
+  (domonad
+    parser-m
+    [reserved parse-uint32
+     timestamp parse-date]
+    {:timestamp timestamp}))
+
 (defn list-transport-addresses
   "Generate a list of transport addresses."
   [addresses-map]
