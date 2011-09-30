@@ -329,7 +329,7 @@
   ;; (.write *out* (str "Received " message "\n"))
   (send (:remote-peers-agent peer)
     (fn [remote-peers]
-      (let [remote-peers (update-remote-peers! remote-peers sender-id {})
+      (let [remote-peers (update-remote-peers! remote-peers peer sender-id {})
             remote-peer (remote-peers sender-id)]
         (condp = (:message-type message)
           message-type-hello (handle-hello! peer message)
