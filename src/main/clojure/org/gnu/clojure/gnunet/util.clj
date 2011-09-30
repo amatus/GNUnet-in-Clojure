@@ -50,3 +50,8 @@
         (assoc _map _key 
                (conj old-val (second kv)))))
         _map (partition 2 kvs)))
+
+(defn do-callbacks!
+  [callback-seq & args]
+  (doseq [callback! callback-seq]
+    (apply callback! args)))

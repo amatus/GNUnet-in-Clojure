@@ -1,8 +1,8 @@
-(ns org.gnu.clojure.gnunet.topology_events)
+(ns org.gnu.clojure.gnunet.topology_events
+  (:use org.gnu.clojure.gnunet.util))
 
 (defn notify-new-remote-peer!
   [peer remote-peer]
-  (let [callbacks (:new-peer-callbacks (deref (:topology-agent peer)))]
-    (doseq [callback! callbacks]
-      (callback! peer remote-peer))))
+  (do-callbacks! (:new-peer-callbacks (deref (:topology-agent peer)))
+                 peer remote-peer))
 

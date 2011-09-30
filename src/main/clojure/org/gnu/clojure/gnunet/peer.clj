@@ -123,12 +123,10 @@
 
 (defn selector-loop!
   [selector callbacks]
-  (doseq [callback (queue-seq! callbacks)]
-    (callback))
+  (do-callbacks! (queue-seq! callbacks))
   (.select selector)
   (let [selected-keys (.selectedKeys selector)]
-    (doseq [selection-key selected-keys]
-      ((.attachment selection-key)))
+    (do-callbacks! (map #(.attachment %) selected-keys))
     (.clear selected-keys))
   (recur selector callbacks))
 
