@@ -53,7 +53,7 @@
     ;; agent of a map of peer IDs to struct remote-peer
     :remote-peers-agent
     
-    ;; agent of a map of transport names (String) to maps of {:emit-message!}
+    ;; agent of a map of transport names (String) to maps of {:emit-messages!}
     :transports-agent
     
     ;; {
