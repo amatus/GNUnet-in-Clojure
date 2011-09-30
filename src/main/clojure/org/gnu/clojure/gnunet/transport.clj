@@ -86,7 +86,6 @@
     (encode-signed (:signature-purpose pong)
       (concat
         (encode-date (:expiration pong))
-        (:peer-id pong)
         (encode-int32 address-length)
         transport
         (:encoded-address pong)))))
@@ -105,7 +104,6 @@
      signed (parse-signed
               (domonad parser-m
                 [expiration parse-date
-                 peer-id (items id-size)
                  address-length parse-uint32
                  transport (none-or-more (satisfy #(not (== 0 %))))
                  zero item
@@ -113,7 +111,6 @@
                  :when (>= address-length transport-length)
                  encoded-address (items (- address-length transport-length))]
                 {:expiration expiration
-                 :peer-id peer-id
                  :transport (String. (byte-array transport) "UTF-8")
                  :encoded-address encoded-address}))
      :let [signature-purpose (:purpose signed)]
@@ -245,7 +242,6 @@
          pong {:challenge (:challenge ping)
                :signature-purpose signature-purpose-pong-own
                :expiration (pong-expiration)
-               :peer-id (:id peer)
                :transport (:transport ping)
                :encoded-address (:encoded-address ping)}
          signed-material (encode-pong-signed-material pong)
@@ -278,30 +274,39 @@
 
 (defn handle-pong-own!
   [peer remote-peer pong]
-  ;; TODO - test that the challenge matches before wasting time with RSA
-  (.execute (:cpu-bound-executor peer)
-    (fn []
-      (domonad maybe-m
-        [public-key (deref (:public-key-atom remote-peer))
-         :when (rsa-verify public-key (:signed-material pong)
-                 (:signature pong))]
-        (send-do-exception-m! (:transport-addresses-agent remote-peer)
-          [address (with-state-field (:transport pong)
-                     (fetch-val (:encoded-address pong)))
-           :when (= (:challenge address) (:challenge pong))
-           _ (with-state-field (:transport pong)
-               (set-val (:encoded-address pong)
-                 {:expiration (hello-address-expiration)
-                  :latency (- (.getTime (Date.))
-                             (.getTime (:send-time address)))}))]
-          (metric-add! peer "Peer addresses considered valid" 1))))))
+  (domonad
+    maybe-m
+    [transport (:transport pong)
+     encoded-address (:encoded-address pong)
+     transport-addresses (deref (:transport-addresses-agent remote-peer))
+     addresses (transport-addresses transport)
+     address (addresses encoded-address)
+     :when (= (:challenge address) (:challenge pong))]
+    (.execute
+      (:cpu-bound-executor peer)
+      (fn []
+        (domonad
+          maybe-m
+          [public-key (deref (:public-key-atom remote-peer))
+           :when (rsa-verify public-key (:signed-material pong)
+                             (:signature pong))]
+          (send-do-exception-m!
+            (:transport-addresses-agent remote-peer)
+            [_ (with-state-field
+                 transport
+                 (set-val
+                   encoded-address
+                   {:expiration (hello-address-expiration)
+                    :latency (- (.getTime (Date.))
+                                (.getTime (:send-time address)))}))]
+            (notify-new-valid-address! peer remote-peer transport
+                                       encoded-address)))))))
 
 (defn handle-pong!
-  [peer message]
+  [peer remote-peer message]
   (domonad maybe-m
     [pong (first (parse-pong (:bytes message)))
-     :when-not (.after (Date.) (:expiration pong))
-     remote-peer ((deref (:remote-peers-agent peer)) (:peer-id pong))]
+     :when-not (.after (Date.) (:expiration pong))]
     (condp == (:signature-purpose pong)
       signature-purpose-pong-own (handle-pong-own! peer remote-peer pong)
       nil)))
@@ -329,6 +334,6 @@
         (condp = (:message-type message)
           message-type-hello (handle-hello! peer message)
           message-type-transport-ping (handle-ping! peer remote-peer message)
-          message-type-transport-pong (handle-pong! peer message)
+          message-type-transport-pong (handle-pong! peer remote-peer message)
           (handle-receive! peer remote-peer message))
         remote-peers))))
