@@ -186,6 +186,11 @@
                         :transport (:transport address)
                         :encoded-address (:encoded-address address)})})
 
+(defn connect-message
+  []
+  {:message-type message-type-transport-connect
+   :bytes (encode-connect {:timestamp (Date.)})})
+
 (defn update-transport-addresses
   [addresses new-addresses]
   (merge-transport-addresses {}

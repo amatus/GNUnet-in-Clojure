@@ -35,10 +35,17 @@
   (send (:transport-addresses-agent remote-peer)
     verify-transport-addresses! peer remote-peer))
 
+(defn new-valid-address-callback!
+  [peer remote-peer transport-name encoded-address]
+  (let [transport ((deref (:transports-agent peer)) transport-name)]
+    ((:emit-messages! transport) transport remote-peer encoded-address nil
+       [(connect-message)])))
+
 (defn activate-topology!
   [peer]
   (send
     (:topology-agent peer)
     conj-vals
     #{}
-    [:new-peer-callbacks new-peer-callback!]))
+    [:new-peer-callbacks new-peer-callback!
+     :new-valid-address-callbacks new-valid-address-callback!]))
