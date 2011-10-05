@@ -129,8 +129,7 @@
 
 (defn make-aes-key
   [byte-seq]
-  (.generateSecret (SecretKeyFactory/getInstance "AES")
-    (SecretKeySpec. (byte-array byte-seq) "AES")))
+  (SecretKeySpec. (byte-array byte-seq) "AES"))
 
 (defn crc32
   [byte-seq]
@@ -326,7 +325,10 @@
         hashes (iterate sha-512 seed)
         number (BigInteger. 1 (byte-array (apply concat (take cnt hashes))))
         len (.bitLength number)
-        number (reduce bit-clear number (range (dec len) (dec bit-length) -1))]
+        number (reduce
+                 #(.clearBit %1 %2)
+                 number
+                 (range (dec len) (dec bit-length) -1))]
     [number (nth hashes cnt)]))
 (is (= (let [[n seed] (random-int 1024 (sha-512 []))]
          [n (vec seed)])
@@ -339,7 +341,8 @@
 (defn fermat-compositeness-test
   "Perform Fermat's Compositeness Test on the given BigInteger."
   [number]
-  (not (== 1 (.modPow (biginteger 2) (dec number) number))))
+  (not
+    (== 1 (.modPow (biginteger 2) (.subtract number BigInteger/ONE) number))))
 
 (defn miller-rabin-compositeness-test
   "Perform the Miller-Rabin Compositeness Test on the given BigInteger with the
@@ -347,9 +350,9 @@
    round."
   [n steps seed]
   (let [bit-length (.bitLength n)
-        nminus1 (dec n)
+        nminus1 (.subtract n BigInteger/ONE)
         k (.getLowestSetBit nminus1)
-        q (bit-shift-right nminus1 k)]
+        q (.shiftRight nminus1 k)]
     (loop [step 0 seed seed]
       (if (>= step steps)
         [false seed]
@@ -376,9 +379,9 @@
   {:pre [(>= bit-length 32)]}
   (loop [seed seed]
     (let [[prime seed] (random-int bit-length seed)
-          prime (bit-set prime (dec bit-length))
-          prime (bit-set prime (- bit-length 2))
-          prime (bit-set prime 0)
+          prime (.setBit prime (dec bit-length))
+          prime (.setBit prime (- bit-length 2))
+          prime (.setBit prime 0)
           mods (map (partial rem prime) small-primes)
           [prime seed] (loop [step 0 seed seed]
                          (if (> step 20000)
@@ -386,7 +389,7 @@
                            (if (not-any?
                                  zero?
                                  (map #(rem (+ step %1) %2) mods small-primes))
-                             (let [prime (+ prime step)]
+                             (let [prime (.add prime (biginteger step))]
                                (if (fermat-compositeness-test prime)
                                  (recur (inc step) seed)
                                  (let [[result seed]
@@ -421,14 +424,14 @@
                                            [q seed] (generate-prime
                                                       (quot bit-length 2) seed)
                                            [p q] (sort [p q])
-                                           n (* p q)]
+                                           n (.multiply p q)]
                                        [n p q seed])
                              [(biginteger 0) 0 0 seed])))
-          t1 (dec p)
-          t2 (dec q)
-          phi (* t1 t2)
+          t1 (.subtract p BigInteger/ONE)
+          t2 (.subtract q BigInteger/ONE)
+          phi (.multiply t1 t2)
           g (.gcd t1 t2)
-          f (quot phi g)
+          f (.divide phi g)
           e (biginteger (first (filter #(== 1 (.gcd phi (biginteger %)))
                              (iterate (partial + 2) 257))))]
       (let [private-key (try
