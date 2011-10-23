@@ -1,5 +1,5 @@
 (ns org.gnu.clojure.gnunet.core
-  (:use (org.gnu.clojure.gnunet crypto exception message parser peer util)
+  (:use (org.gnu.clojure.gnunet crypto exception message parser peer util zip)
     clojure.contrib.monads)
   (:import (java.util Date Calendar)))
 
@@ -7,6 +7,9 @@
 (def message-type-core-encrypted-message 82)
 (def message-type-core-ping 83)
 (def message-type-core-pong 84)
+(def message-type-core-hangup 85)
+(def message-type-core-compressed-type-map 86)
+(def message-type-core-binary-type-map 87)
 
 (def signature-purpose-set-key 3)
 
@@ -172,6 +175,12 @@
      :when message]
     message))
 
+(def parse-compressed-type-map
+  (domonad
+    parser-m
+    [compressed-bytes (zero-or-more item)]
+    :type-map (inflate compressed-bytes)))
+
 (defn emit-messages!
   [peer remote-peer messages]
   (let [state (deref (:state-agent remote-peer))
@@ -288,14 +297,22 @@
              (assoc % :status peer-status-key-confirmed)
              %))))))
 
+(defn handle-compressed-type-map!
+  [peer remote-peer message]
+  (when-let [type-map (first ((parse-core-compressed-type-map)
+                                (:bytes message)))
+             (.write *out* (str "Got type map :" type-map "\n"))
+
 (defn admit-core-message!
   [peer remote-peer message]
-  (if-let [dispatchers ((deref (:dispatch-agent peer))
-                         (:message-type message))]
-    (doseq [dispatcher! dispatchers]
-      (dispatcher! peer remote-peer message))
-    (.write *out* (str "No dispatcher for message type "
-                    (:message-type message) "\n"))))
+  (let [message-type (:message-type message)]
+    (condp = message-type
+      message-type-core-compressed-type-map (handle-compressed-type-map!
+                                              peer remote-peer message)
+      (if-let [dispatchers ((deref (:dispatch-agent peer)) message-type)]
+        (do-callbacks! dispatchers peer remote-peer message)
+        (.write *out*
+                (str "No dispatcher for message type " message-type "\n"))))))
 
 (defn handle-core-encrypted-message!
   [peer remote-peer message]
@@ -334,7 +351,7 @@
   [peer state]
   (conj state
     {:status peer-status-down
-     :decrypt-key-created (Date. (long 0))
+     :decrypt-key-created (Date. Long/MIN_VALUE)
      :encrypt-key (generate-aes-key! (:random peer))
      :encrypt-key-created (Date.)
      :ping-challenge (.nextInt (:random peer))
